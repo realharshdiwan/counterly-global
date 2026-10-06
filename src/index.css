@@ -1,0 +1,309 @@
+@import "tailwindcss";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+@layer base {
+  :root {
+    --bg: #f5f5f7;
+    --card: #ffffff;
+    --card-subtle: #fafafc;
+    --ink: #1d1d1f;
+    --ink-secondary: #515154;
+    --mute: #86868b;
+    --line: #e5e5e7;
+    --line-strong: #d2d2d7;
+    
+    /* Apple / Framer Palette Colors */
+    --apple-black: #1d1d1f;
+    --apple-blue: #0071e3;
+    --apple-blue-hover: #0077ed;
+    --apple-green: #34c759;
+    --apple-red: #ff3b30;
+    --apple-gray-bg: #f5f5f7;
+    --apple-gray-surface: #e8e8ed;
+
+    --green-950: #1d1d1f;
+    --green-900: #1d1d1f;
+    --green-800: #1d1d1f;
+    --green-700: #0071e3;
+    --green-600: #0071e3;
+    --green-500: #34c759;
+    --green-100: #f5f5f7;
+    --green-50: #f5f5f7;
+    --red: #ff3b30;
+  }
+
+  .dark {
+    --bg: #09090b;
+    --card: #18181b;
+    --card-subtle: #121214;
+    --ink: #fafafa;
+    --ink-secondary: #a1a1aa;
+    --mute: #71717a;
+    --line: #27272a;
+    --line-strong: #3f3f46;
+    
+    --apple-black: #fafafa;
+    --apple-blue: #38bdf8;
+    --apple-blue-hover: #60a5fa;
+    --apple-green: #4ade80;
+    --apple-red: #f87171;
+    --apple-gray-bg: #09090b;
+    --apple-gray-surface: #27272a;
+
+    --green-950: #fafafa;
+    --green-900: #f4f4f5;
+    --green-800: #e4e4e7;
+    --green-700: #38bdf8;
+    --green-600: #38bdf8;
+    --green-500: #4ade80;
+    --green-100: #18181b;
+    --green-50: #09090b;
+    --red: #f87171;
+  }
+
+  /* Global dark mode class-based overrides for legacy hex/tail classes */
+  html.dark,
+  html.dark body {
+    background-color: #09090b !important;
+    color: #fafafa !important;
+  }
+
+  html.dark .bg-white {
+    background-color: #18181b;
+    color: #fafafa;
+  }
+
+  html.dark .bg-\[\#F5F5F7\],
+  html.dark .bg-\[\#FBFBFC\],
+  html.dark .bg-stone-50,
+  html.dark .bg-zinc-50 {
+    background-color: #09090b;
+  }
+
+  html.dark .bg-stone-100,
+  html.dark .bg-zinc-100 {
+    background-color: #27272a;
+  }
+
+  html.dark .text-zinc-900,
+  html.dark .text-zinc-950,
+  html.dark .text-stone-900,
+  html.dark .text-stone-950,
+  html.dark .text-\[\#1D1D1F\] {
+    color: #fafafa;
+  }
+
+  html.dark .text-zinc-600,
+  html.dark .text-zinc-500,
+  html.dark .text-stone-600,
+  html.dark .text-stone-500,
+  html.dark .text-\[\#515154\],
+  html.dark .text-\[\#86868B\] {
+    color: #a1a1aa;
+  }
+
+  html.dark .border-zinc-200,
+  html.dark .border-stone-200,
+  html.dark .border-zinc-300,
+  html.dark .border-stone-300,
+  html.dark .border-\[\#E5E5E7\],
+  html.dark .border-\[\#D2D2D7\] {
+    border-color: #27272a;
+  }
+
+  body {
+    background-color: var(--bg);
+    color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "Helvetica Neue", "Plus Jakarta Sans", sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    touch-action: manipulation;
+    transition: background-color 0.2s ease, color 0.2s ease;
+  }
+}
+
+/* Card & Interactive Utilities */
+.apple-card {
+  background-color: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 1rem;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.apple-card-interactive {
+  background-color: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 1rem;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.apple-card-interactive:hover {
+  border-color: var(--line-strong);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
+}
+
+.apple-btn-primary {
+  background-color: var(--ink);
+  color: var(--bg);
+  border-radius: 0.75rem;
+  font-weight: 600;
+  transition: all 0.2s ease;
+}
+.apple-btn-primary:hover {
+  opacity: 0.9;
+}
+
+/* Receipt print layout - Completely unconstrained for 80mm, 58mm and A4 */
+@media print {
+  header, 
+  main, 
+  nav, 
+  footer, 
+  #offline-banner, 
+  .print-hidden, 
+  [class*="print:hidden"] {
+    display: none !important;
+  }
+
+  html, body {
+    width: 100% !important;
+    height: auto !important;
+    min-height: 0 !important;
+    overflow: visible !important;
+    background: #ffffff !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    color: #000000 !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  #root, 
+  #root > div, 
+  .fixed, 
+  [class*="fixed"],
+  [class*="backdrop-"],
+  [class*="overflow-"], 
+  [class*="max-h-"] {
+    position: static !important;
+    display: block !important;
+    overflow: visible !important;
+    max-height: none !important;
+    height: auto !important;
+    min-height: 0 !important;
+    width: 100% !important;
+    max-width: none !important;
+    border: none !important;
+    box-shadow: none !important;
+    background: transparent !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    transform: none !important;
+  }
+
+  #printable-receipt, #printable-receipt *,
+  #printable-barcode-stickers, #printable-barcode-stickers * {
+    visibility: visible !important;
+  }
+
+  #printable-barcode-stickers {
+    position: static !important;
+    display: block !important;
+    margin: 0 auto !important;
+    height: auto !important;
+    max-height: none !important;
+    overflow: visible !important;
+    box-shadow: none !important;
+    border: none !important;
+    background: #ffffff !important;
+    color: #000000 !important;
+  }
+
+  .barcode-print-thermal-single {
+    width: 48mm !important;
+    max-width: 50mm !important;
+    margin: 0 auto !important;
+    padding: 0 !important;
+  }
+  .barcode-sticker-item {
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
+    page-break-after: always !important;
+    break-after: page !important;
+  }
+
+  .barcode-print-a4 {
+    width: 190mm !important;
+    max-width: 210mm !important;
+    margin: 0 auto !important;
+    padding: 5mm !important;
+    display: grid !important;
+    grid-template-columns: repeat(3, 1fr) !important;
+    gap: 4mm !important;
+  }
+  .barcode-print-a4 .barcode-sticker-item {
+    page-break-after: auto !important;
+    break-after: auto !important;
+    margin-bottom: 2mm !important;
+  }
+
+  #printable-receipt {
+    position: static !important;
+    display: block !important;
+    margin: 0 auto !important;
+    height: auto !important;
+    max-height: none !important;
+    overflow: visible !important;
+    box-shadow: none !important;
+    border: none !important;
+    background: #ffffff !important;
+    color: #000000 !important;
+    page-break-inside: auto !important;
+    break-inside: auto !important;
+  }
+
+  #printable-receipt tr, 
+  #printable-receipt .break-inside-avoid,
+  #printable-receipt table {
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
+  }
+
+  #printable-receipt.print-size-80mm {
+    width: 76mm !important;
+    max-width: 80mm !important;
+    margin: 0 auto !important;
+    padding: 2mm 1.5mm !important;
+    border: none !important;
+    font-size: 11px !important;
+    line-height: 1.35 !important;
+    font-family: 'JetBrains Mono', 'Courier New', monospace !important;
+    box-sizing: border-box !important;
+  }
+
+  #printable-receipt.print-size-58mm {
+    width: 52mm !important;
+    max-width: 58mm !important;
+    margin: 0 auto !important;
+    padding: 1.5mm 1mm !important;
+    border: none !important;
+    font-size: 9.5px !important;
+    line-height: 1.25 !important;
+    font-family: 'JetBrains Mono', 'Courier New', monospace !important;
+    box-sizing: border-box !important;
+  }
+
+  #printable-receipt.print-size-a4 {
+    width: 100% !important;
+    max-width: 194mm !important;
+    margin: 0 auto !important;
+    padding: 4mm 6mm !important;
+    border: 1px solid #000000 !important;
+    font-size: 10.5px !important;
+    line-height: 1.3 !important;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", sans-serif !important;
+    box-sizing: border-box !important;
+  }
+}

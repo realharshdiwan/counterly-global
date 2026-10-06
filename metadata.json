@@ -1,0 +1,8 @@
+{
+  "name": "Remix Nandalaya — Quick Bill POS \u0026 Uniform Store Management",
+  "description": "High-speed offline-first point of sale, school uniform price book, rush-hour billing, inventory tracking, and thermal receipt printing for garment retailers.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

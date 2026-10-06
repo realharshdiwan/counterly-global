@@ -1,0 +1,44 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#12894C" />
+      <stop offset="100%" stop-color="#0A5F34" />
+    </linearGradient>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="8" stdDeviation="12" flood-opacity="0.25" />
+    </filter>
+  </defs>
+  <rect width="512" height="512" rx="112" fill="url(#bgGrad)" />
+  
+  <!-- Receipt Paper -->
+  <path d="M196 100 L316 100 L316 160 L196 160 Z" fill="#FFFFFF" filter="url(#shadow)" />
+  <rect x="216" y="118" width="80" height="8" rx="4" fill="#0A5F34" opacity="0.6" />
+  <rect x="226" y="134" width="60" height="6" rx="3" fill="#0A5F34" opacity="0.4" />
+  
+  <!-- POS Terminal Screen -->
+  <rect x="156" y="150" width="200" height="110" rx="18" fill="#FFFFFF" filter="url(#shadow)" />
+  <rect x="168" y="162" width="176" height="86" rx="10" fill="#064E2B" />
+  <!-- Screen Elements -->
+  <rect x="190" y="185" width="132" height="14" rx="4" fill="#22C55E" />
+  <rect x="210" y="210" width="92" height="10" rx="3" fill="#FFFFFF" opacity="0.9" />
+  
+  <!-- Base & Keypad -->
+  <path d="M136 270 L376 270 L396 390 L116 390 Z" fill="#FFFFFF" filter="url(#shadow)" />
+  <path d="M148 280 L364 280 L382 380 L130 380 Z" fill="#064E2B" />
+  
+  <!-- Keypad Buttons -->
+  <!-- Row 1 -->
+  <rect x="160" y="295" width="46" height="20" rx="6" fill="#FFFFFF" />
+  <rect x="233" y="295" width="46" height="20" rx="6" fill="#FFFFFF" />
+  <rect x="306" y="295" width="46" height="20" rx="6" fill="#FFFFFF" />
+  
+  <!-- Row 2 -->
+  <rect x="156" y="323" width="48" height="20" rx="6" fill="#FFFFFF" />
+  <rect x="232" y="323" width="48" height="20" rx="6" fill="#FFFFFF" />
+  <rect x="308" y="323" width="48" height="20" rx="6" fill="#FFFFFF" />
+  
+  <!-- Row 3 -->
+  <rect x="152" y="351" width="50" height="20" rx="6" fill="#FFFFFF" />
+  <rect x="231" y="351" width="50" height="20" rx="6" fill="#FFFFFF" />
+  <rect x="310" y="351" width="50" height="20" rx="6" fill="#22C55E" />
+</svg>
