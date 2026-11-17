@@ -75,29 +75,29 @@ export const ManagerOverrideModal: React.FC<ManagerOverrideModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
-      <div className="bg-white rounded-2xl max-w-sm w-full p-6 shadow-xl border border-[#E5E5E7] animate-in fade-in-50 flex flex-col items-center">
+    <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-xs flex items-center justify-center p-4">
+      <div className="bg-white dark:bg-zinc-900 rounded-2xl max-w-sm w-full p-6 shadow-xl border border-[#E5E5E7] dark:border-zinc-800 flex flex-col items-center">
         
         {/* Top Header */}
-        <div className="w-full flex items-center justify-between pb-3 border-b border-[#E5E5E7]">
+        <div className="w-full flex items-center justify-between pb-3 border-b border-[#E5E5E7] dark:border-zinc-800">
           <div className="flex items-center gap-2">
-            <div className="w-8 h-8 rounded-xl bg-[#F5F5F7] text-[#1D1D1F] flex items-center justify-center">
+            <div className="w-8 h-8 rounded-xl bg-[#F5F5F7] dark:bg-zinc-800 text-[#1D1D1F] dark:text-zinc-100 flex items-center justify-center">
               <ShieldAlert className="w-4 h-4" />
             </div>
             <div>
-              <h3 className="font-bold text-sm text-[#1D1D1F]">{actionTitle}</h3>
-              <p className="text-[10px] text-[#86868B]">Shift Lead Confirmation</p>
+              <h3 className="font-bold text-sm text-[#1D1D1F] dark:text-zinc-100">{actionTitle}</h3>
+              <p className="text-[10px] text-[#86868B] dark:text-zinc-400">Shift Lead Confirmation</p>
             </div>
           </div>
           <button
             onClick={onClose}
-            className="text-[#86868B] hover:text-[#1D1D1F] p-1 cursor-pointer transition-colors"
+            className="text-[#86868B] hover:text-[#1D1D1F] dark:hover:text-white p-1 cursor-pointer transition-colors"
           >
             <X className="w-4 h-4" />
           </button>
         </div>
 
-        <p className="text-xs text-[#515154] text-center mt-3">
+        <p className="text-xs text-[#515154] dark:text-zinc-400 text-center mt-3">
           {actionDescription}
         </p>
 
@@ -110,8 +110,8 @@ export const ManagerOverrideModal: React.FC<ManagerOverrideModalProps> = ({
                 key={index}
                 className={`w-3.5 h-3.5 rounded-full transition-all duration-150 border-2 ${
                   isFilled
-                    ? 'bg-[#1D1D1F] border-[#1D1D1F] scale-110 shadow-xs'
-                    : 'bg-white border-[#E5E5E7]'
+                    ? 'bg-[#1D1D1F] dark:bg-zinc-100 border-[#1D1D1F] dark:border-zinc-100 scale-110 shadow-xs'
+                    : 'bg-white dark:bg-zinc-900 border-[#E5E5E7] dark:border-zinc-700'
                 }`}
               />
             );
@@ -119,7 +119,7 @@ export const ManagerOverrideModal: React.FC<ManagerOverrideModalProps> = ({
         </div>
 
         {error && (
-          <div className="text-xs font-semibold text-red-600 flex items-center gap-1 mb-2">
+          <div className="text-xs font-semibold text-red-600 dark:text-red-400 flex items-center gap-1 mb-2">
             <AlertCircle className="w-3.5 h-3.5" />
             <span>{error}</span>
           </div>
@@ -133,7 +133,7 @@ export const ManagerOverrideModal: React.FC<ManagerOverrideModalProps> = ({
               type="button"
               onClick={() => handleDigitClick(num)}
               disabled={isSubmitting}
-              className="h-11 rounded-xl bg-[#F5F5F7] border border-[#E5E5E7] text-lg font-bold text-[#1D1D1F] hover:bg-[#E8E8ED] active:scale-95 transition-all flex items-center justify-center cursor-pointer"
+              className="h-11 rounded-xl bg-[#F5F5F7] dark:bg-zinc-800 border border-[#E5E5E7] dark:border-zinc-700 text-lg font-bold text-[#1D1D1F] dark:text-zinc-100 hover:bg-[#E8E8ED] dark:hover:bg-zinc-700 active:scale-95 transition-all flex items-center justify-center cursor-pointer"
             >
               {num}
             </button>
@@ -142,7 +142,7 @@ export const ManagerOverrideModal: React.FC<ManagerOverrideModalProps> = ({
           <button
             type="button"
             onClick={handleClear}
-            className="h-11 rounded-xl bg-white border border-[#E5E5E7] text-[11px] font-semibold text-[#86868B] hover:bg-[#F5F5F7] flex items-center justify-center cursor-pointer"
+            className="h-11 rounded-xl bg-white dark:bg-zinc-800/60 border border-[#E5E5E7] dark:border-zinc-700 text-[11px] font-semibold text-[#86868B] dark:text-zinc-400 hover:bg-[#F5F5F7] dark:hover:bg-zinc-700 flex items-center justify-center cursor-pointer"
           >
             Clear
           </button>
@@ -151,7 +151,7 @@ export const ManagerOverrideModal: React.FC<ManagerOverrideModalProps> = ({
             type="button"
             onClick={() => handleDigitClick('0')}
             disabled={isSubmitting}
-            className="h-11 rounded-xl bg-[#F5F5F7] border border-[#E5E5E7] text-lg font-bold text-[#1D1D1F] hover:bg-[#E8E8ED] active:scale-95 transition-all flex items-center justify-center cursor-pointer"
+            className="h-11 rounded-xl bg-[#F5F5F7] dark:bg-zinc-800 border border-[#E5E5E7] dark:border-zinc-700 text-lg font-bold text-[#1D1D1F] dark:text-zinc-100 hover:bg-[#E8E8ED] dark:hover:bg-zinc-700 active:scale-95 transition-all flex items-center justify-center cursor-pointer"
           >
             0
           </button>
@@ -159,17 +159,17 @@ export const ManagerOverrideModal: React.FC<ManagerOverrideModalProps> = ({
           <button
             type="button"
             onClick={handleBackspace}
-            className="h-11 rounded-xl bg-white border border-[#E5E5E7] text-[11px] font-semibold text-[#86868B] hover:bg-[#F5F5F7] flex items-center justify-center cursor-pointer"
+            className="h-11 rounded-xl bg-white dark:bg-zinc-800/60 border border-[#E5E5E7] dark:border-zinc-700 text-[11px] font-semibold text-[#86868B] dark:text-zinc-400 hover:bg-[#F5F5F7] dark:hover:bg-zinc-700 flex items-center justify-center cursor-pointer"
           >
             ⌫
           </button>
         </div>
 
-        <div className="w-full flex items-center justify-between mt-4 pt-3 border-t border-[#E5E5E7]">
+        <div className="w-full flex items-center justify-between mt-4 pt-3 border-t border-[#E5E5E7] dark:border-zinc-800">
           <button
             type="button"
             onClick={onClose}
-            className="w-full py-2.5 rounded-xl border border-[#E5E5E7] text-xs font-semibold text-[#1D1D1F] hover:bg-[#F5F5F7] transition-colors cursor-pointer"
+            className="w-full py-2.5 rounded-xl border border-[#E5E5E7] dark:border-zinc-700 text-xs font-semibold text-[#1D1D1F] dark:text-zinc-200 hover:bg-[#F5F5F7] dark:hover:bg-zinc-800 transition-colors cursor-pointer"
           >
             Cancel
           </button>

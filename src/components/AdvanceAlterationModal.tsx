@@ -1,35 +1,24 @@
-import React, { useState, useEffect, useMemo } from 'react';
-import { 
-  Scissors, 
-  Printer, 
-  Share2, 
-  CheckCircle2, 
-  AlertCircle, 
-  X, 
-  Calendar, 
-  Phone, 
-  User, 
-  Clock, 
-  Plus, 
+import React, { useState, useEffect } from 'react';
+import {
+  Scissors,
+  Printer,
+  Share2,
+  X,
   Search,
-  School as SchoolIcon,
-  PackageCheck,
-  RotateCcw,
   QrCode,
-  Maximize2
+  Maximize2,
 } from 'lucide-react';
 import QRCode from 'qrcode';
 import { db } from '../db/db';
-import { 
-  type AdvanceOrderJob, 
-  type AdvanceOrderStatus, 
-  type AdvanceOrderItem, 
-  type School, 
-  type ShopConfig, 
-  type PaymentMethod 
+import {
+  type AdvanceOrderJob,
+  type AdvanceOrderStatus,
+  type School,
+  type ShopConfig,
+  type PaymentMethod,
 } from '../types';
 import { bluetoothPrinter } from '../lib/printer';
-import { useAuth } from '../context/AuthContext';
+import { formatMoney, formatDateShort, getCurrencySymbol, getCurrencyCode } from '../lib/locale';
 
 interface AdvanceAlterationModalProps {
   isOpen: boolean;
@@ -48,7 +37,6 @@ export const AdvanceAlterationModal: React.FC<AdvanceAlterationModalProps> = ({
   initialCustomerName = '',
   onOrderUpdated,
 }) => {
-  const { currentUser } = useAuth();
   const [orders, setOrders] = useState<AdvanceOrderJob[]>([]);
   const [shopConfig, setShopConfig] = useState<ShopConfig | null>(null);
   const [activeTab, setActiveTab] = useState<'list' | 'create'>('list');
@@ -58,23 +46,22 @@ export const AdvanceAlterationModal: React.FC<AdvanceAlterationModalProps> = ({
   // Create Form State
   const [customerName, setCustomerName] = useState(initialCustomerName);
   const [customerPhone, setCustomerPhone] = useState(initialPhone);
-  const [studentName, setStudentName] = useState('');
+  const [referenceNote, setReferenceNote] = useState('');
   const [selectedSchoolId, setSelectedSchoolId] = useState(schools[0]?.id || '');
-  const [orderType, setOrderType] = useState<'alteration' | 'advance_booking' | 'custom_tailoring'>('alteration');
-  
+
   // Job items
-  const [productName, setProductName] = useState('School Pant / Trousers');
-  const [sizeLabel, setSizeLabel] = useState('28');
-  const [qty, setQty] = useState('1');
-  const [estimatedPrice, setEstimatedPrice] = useState('340');
-  const [alterationNotes, setAlterationNotes] = useState('Hem length shorten by 2 inches');
-  const [advancePaid, setAdvancePaid] = useState('100');
+  const [productName, setProductName] = useState('');
+  const [sizeLabel, setSizeLabel] = useState('');
+  const [qty] = useState('1');
+  const [estimatedPrice, setEstimatedPrice] = useState('');
+  const [alterationNotes, setAlterationNotes] = useState('');
+  const [advancePaid, setAdvancePaid] = useState('0');
   const [advancePaymentMethod, setAdvancePaymentMethod] = useState<PaymentMethod>('cash');
   const [advanceUpiQr, setAdvanceUpiQr] = useState<string>('');
   const [showStandeeQr, setShowStandeeQr] = useState(false);
   const [deliveryDate, setDeliveryDate] = useState<string>(() => {
     const d = new Date();
-    d.setDate(d.getDate() + 2); // default 2 days later
+    d.setDate(d.getDate() + 2);
     return d.toISOString().slice(0, 10);
   });
 
@@ -84,8 +71,10 @@ export const AdvanceAlterationModal: React.FC<AdvanceAlterationModalProps> = ({
   useEffect(() => {
     if (isOpen) {
       loadData();
+      setCustomerPhone(initialPhone);
+      setCustomerName(initialCustomerName);
     }
-  }, [isOpen]);
+  }, [isOpen, initialPhone, initialCustomerName]);
 
   const loadData = async () => {
     try {
@@ -96,7 +85,7 @@ export const AdvanceAlterationModal: React.FC<AdvanceAlterationModalProps> = ({
       setOrders(allOrders);
       if (configs.length > 0) setShopConfig(configs[0]);
     } catch (err) {
-      console.error('Failed to load advance orders:', err);
+      console.error('Failed to load alteration orders:', err);
     }
   };
 
@@ -105,21 +94,23 @@ export const AdvanceAlterationModal: React.FC<AdvanceAlterationModalProps> = ({
     setTimeout(() => setToastMessage(null), 2500);
   };
 
-  const currentSchool = schools.find(s => s.id === selectedSchoolId);
+  const currentSchool = schools.find((s) => s.id === selectedSchoolId);
   const totalAmount = (parseFloat(estimatedPrice) || 0) * (parseInt(qty, 10) || 1);
   const advanceAmount = parseFloat(advancePaid) || 0;
   const balanceDue = Math.max(0, totalAmount - advanceAmount);
+  const currSymbol = getCurrencySymbol(shopConfig);
+  const currCode = getCurrencyCode(shopConfig);
 
-  // Generate dynamic UPI QR whenever payment is UPI and advance > 0
+  // Generate dynamic UPI QR whenever payment is UPI and store UPI ID is configured
   useEffect(() => {
-    if (advanceAmount > 0 && advancePaymentMethod === 'upi') {
-      const upiVpa = shopConfig?.upi_id || '9876543210@upi';
-      const payeeName = encodeURIComponent(shopConfig?.legal_name || 'SARASWATI GARMENTS');
-      const upiString = `upi://pay?pa=${upiVpa}&pn=${payeeName}&am=${advanceAmount}&cu=INR&tn=Advance+Order+Deposit`;
-      
+    if (advanceAmount > 0 && advancePaymentMethod === 'upi' && shopConfig?.upi_id) {
+      const upiVpa = shopConfig.upi_id;
+      const payeeName = encodeURIComponent(shopConfig.legal_name || 'SikkaDesk Store');
+      const upiString = `upi://pay?pa=${upiVpa}&pn=${payeeName}&am=${advanceAmount}&cu=INR&tn=Alteration+Deposit`;
+
       QRCode.toDataURL(upiString, { width: 260, margin: 1 })
-        .then(url => setAdvanceUpiQr(url))
-        .catch(err => console.error('Failed to generate advance UPI QR:', err));
+        .then((url) => setAdvanceUpiQr(url))
+        .catch((err) => console.error('Failed to generate advance UPI QR:', err));
     } else {
       setAdvanceUpiQr('');
     }
@@ -127,38 +118,37 @@ export const AdvanceAlterationModal: React.FC<AdvanceAlterationModalProps> = ({
 
   if (!isOpen) return null;
 
-  // Handle Save New Job
   const handleCreateOrder = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!customerPhone || !productName) {
-      showToast('Please fill required phone and garment details');
+    if (!customerPhone.trim() || !productName.trim()) {
+      showToast('Please enter customer phone and item description');
       return;
     }
 
     setIsSubmitting(true);
     try {
-      // Calculate true sequential token number (e.g. ALT-2026-1001)
       const existingJobsCount = await db.advance_orders.count();
-      const tokenNumber = `ALT-2026-${String(1001 + existingJobsCount).padStart(4, '0')}`;
+      const year = new Date().getFullYear();
+      const tokenNumber = `ALT-${year}-${String(1001 + existingJobsCount).padStart(4, '0')}`;
       const nowIso = new Date().toISOString();
 
       const newOrder: AdvanceOrderJob = {
         id: `adv_${Date.now()}`,
         token_number: tokenNumber,
-        order_type: orderType,
-        customer_name: customerName || 'Customer',
-        customer_phone: customerPhone,
-        student_name: studentName,
+        order_type: 'alteration',
+        customer_name: customerName.trim() || 'Customer',
+        customer_phone: customerPhone.trim(),
+        student_name: referenceNote.trim(),
         school_id: selectedSchoolId,
         school_name: currentSchool?.name || '',
         items: [
           {
             id: `item_${Date.now()}`,
-            product_name: productName,
-            size_label: sizeLabel,
+            product_name: productName.trim(),
+            size_label: sizeLabel.trim() || 'Standard',
             qty: parseInt(qty, 10) || 1,
             estimated_price: parseFloat(estimatedPrice) || 0,
-            alteration_notes: alterationNotes,
+            alteration_notes: alterationNotes.trim(),
           },
         ],
         total_amount: totalAmount,
@@ -173,17 +163,22 @@ export const AdvanceAlterationModal: React.FC<AdvanceAlterationModalProps> = ({
       await db.advance_orders.add(newOrder);
       await loadData();
       setActiveTab('list');
-      showToast(`Order #${tokenNumber} created successfully!`);
+      setProductName('');
+      setSizeLabel('');
+      setEstimatedPrice('');
+      setAlterationNotes('');
+      setAdvancePaid('0');
+      setReferenceNote('');
+      showToast(`Ticket #${tokenNumber} created`);
       if (onOrderUpdated) onOrderUpdated();
     } catch (err) {
-      console.error('Failed to create advance order:', err);
-      showToast('Error creating order');
+      console.error('Failed to create alteration order:', err);
+      showToast('Error creating ticket');
     } finally {
       setIsSubmitting(false);
     }
   };
 
-  // Update Status
   const handleUpdateStatus = async (orderId: string, newStatus: AdvanceOrderStatus) => {
     try {
       const updates: Partial<AdvanceOrderJob> = { status: newStatus };
@@ -202,39 +197,37 @@ export const AdvanceAlterationModal: React.FC<AdvanceAlterationModalProps> = ({
     }
   };
 
-  // WhatsApp Pickup Reminder to Parent
   const handleSendWhatsAppReady = (order: AdvanceOrderJob) => {
-    const shopName = shopConfig?.legal_name || 'Saraswati Garments';
-    const msg = `*UNIFORM READY FOR PICKUP*\nDear ${order.customer_name},\nYour uniform tailoring / order *#${order.token_number}* (${order.student_name ? order.student_name + ' - ' : ''}${order.items.map(i => i.product_name + ' ' + i.size_label).join(', ')}) is now *READY FOR PICKUP* at ${shopName}!\n\n• *Balance Due: Rs.${order.balance_due}*\n• *Location:* Main Market\n• *Store Hours:* 10:00 AM - 9:00 PM\n\nPlease show Token *#${order.token_number}* at the billing counter.`;
-    
+    const shopName = shopConfig?.legal_name || 'SikkaDesk Store';
+    const itemsSummary = order.items.map((i) => `${i.product_name} (${i.size_label})`).join(', ');
+    const msg = `*ORDER READY FOR PICKUP*\nHello ${order.customer_name},\nYour tailoring / alteration order *#${order.token_number}* (${order.student_name ? order.student_name + ' - ' : ''}${itemsSummary}) is now *READY FOR PICKUP* at ${shopName}.\n\n• *Balance Due:* ${formatMoney(order.balance_due, shopConfig)}\n• *Address:* ${shopConfig?.shop_address || 'Store Counter'}\n\nPlease show Ticket *#${order.token_number}* at pickup.`;
+
     const cleanPhone = order.customer_phone.replace(/\D/g, '');
-    const fullPhone = cleanPhone.length === 10 ? `91${cleanPhone}` : cleanPhone;
-    const url = `https://wa.me/${fullPhone}?text=${encodeURIComponent(msg)}`;
+    const url = `https://wa.me/${cleanPhone}?text=${encodeURIComponent(msg)}`;
     window.open(url, '_blank');
   };
 
-  // Thermal Print Token Slip
   const handlePrintToken = async (order: AdvanceOrderJob) => {
-    const shopName = shopConfig?.legal_name || 'SARASWATI GARMENTS';
-    const dateFormatted = new Date(order.created_at).toLocaleDateString('en-IN');
-    const deliveryFormatted = new Date(order.expected_delivery_date).toLocaleDateString('en-IN');
+    const shopName = shopConfig?.legal_name || 'SIKKADESK STORE';
+    const dateFormatted = formatDateShort(order.created_at, shopConfig);
+    const deliveryFormatted = formatDateShort(order.expected_delivery_date, shopConfig);
 
     try {
       if (bluetoothPrinter.isConnected()) {
-        const text = `\x1B@\x1Ba\x01\x1BE\x01${shopName}\x1BE\x00\nALTERATION & PICKUP TOKEN\nToken: \x1BE\x01#${order.token_number}\x1BE\x00\nDate: ${dateFormatted}\n--------------------------------\n\x1Ba\x00Customer: ${order.customer_name}\nPhone: ${order.customer_phone}\nStudent: ${order.student_name || 'N/A'}\nSchool: ${order.school_name || 'N/A'}\n--------------------------------\nITEMS & ALTERATION SPECS:\n${order.items.map(i => `- ${i.product_name} (${i.size_label}) x${i.qty}\n  Note: ${i.alteration_notes || 'Standard'}`).join('\n')}\n--------------------------------\nTotal Amount: Rs.${order.total_amount}\nAdvance Received: Rs.${order.advance_paid} (${order.advance_payment_method.toUpperCase()})\n\x1BE\x01BALANCE DUE: Rs.${order.balance_due}\x1BE\x00\nReady Date: ${deliveryFormatted}\n--------------------------------\nPlease bring this token for pickup\n\n\n\x1DV\x42\x00`;
+        const text = `\x1B@\x1Ba\x01\x1BE\x01${shopName}\x1BE\x00\nALTERATION & PICKUP TICKET\nTicket: \x1BE\x01#${order.token_number}\x1BE\x00\nDate: ${dateFormatted}\n--------------------------------\n\x1Ba\x00Customer: ${order.customer_name}\nPhone: ${order.customer_phone}\n${order.student_name ? `Ref: ${order.student_name}\n` : ''}${order.school_name ? `Account: ${order.school_name}\n` : ''}--------------------------------\nITEMS & SPECS:\n${order.items.map((i) => `- ${i.product_name} (${i.size_label}) x${i.qty}\n  Note: ${i.alteration_notes || 'Standard'}`).join('\n')}\n--------------------------------\nTotal Estimate: ${currCode} ${order.total_amount.toFixed(2)}\nDeposit Paid: ${currCode} ${order.advance_paid.toFixed(2)} (${order.advance_payment_method.toUpperCase()})\n\x1BE\x01BALANCE DUE: ${currCode} ${order.balance_due.toFixed(2)}\x1BE\x00\nTarget Pickup: ${deliveryFormatted}\n--------------------------------\nPlease bring this ticket for pickup\n\n\n\x1DV\x42\x00`;
         const data = new TextEncoder().encode(text);
         await bluetoothPrinter.printData(data);
-        showToast('Token printed on Thermal Printer!');
+        showToast('Ticket printed on Thermal Printer');
       } else {
         window.print();
         showToast('Print dialog opened');
       }
     } catch (err: unknown) {
-      showToast((err as Error)?.message || 'Failed to print token');
+      showToast((err as Error)?.message || 'Failed to print ticket');
     }
   };
 
-  const filteredOrders = orders.filter(o => {
+  const filteredOrders = orders.filter((o) => {
     if (statusFilter !== 'all' && o.status !== statusFilter) return false;
     if (!searchQuery) return true;
     const q = searchQuery.toLowerCase();
@@ -247,41 +240,44 @@ export const AdvanceAlterationModal: React.FC<AdvanceAlterationModalProps> = ({
   });
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4 overflow-y-auto">
-      <div className="bg-white rounded-2xl max-w-3xl w-full p-6 sm:p-7 shadow-xl border border-[#E5E5E7] animate-in fade-in-50 max-h-[92vh] flex flex-col my-auto">
-        
+    <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto">
+      <div className="bg-white dark:bg-zinc-900 rounded-2xl max-w-3xl w-full p-6 sm:p-7 shadow-xl border border-[#E5E5E7] dark:border-zinc-800 max-h-[92vh] flex flex-col my-auto">
         {/* Header */}
-        <div className="flex items-center justify-between pb-4 border-b border-[#E5E5E7]">
+        <div className="flex items-center justify-between pb-4 border-b border-[#E5E5E7] dark:border-zinc-800">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-2xl bg-[#1D1D1F] text-white flex items-center justify-center shadow-xs">
+            <div className="w-10 h-10 rounded-xl bg-[#1D1D1F] dark:bg-zinc-100 text-white dark:text-zinc-900 flex items-center justify-center shadow-xs">
               <Scissors className="w-5 h-5" />
             </div>
             <div>
-              <h2 className="font-extrabold text-lg text-[#1D1D1F]">Advance Orders &amp; Alteration Desk</h2>
-              <p className="text-xs text-[#86868B]">
-                Track tailoring, pant hemming, advance bookings, token slips, and pickup reminders
+              <h2 className="font-extrabold text-lg text-[#1D1D1F] dark:text-zinc-100">
+                Tailoring &amp; Alterations Desk
+              </h2>
+              <p className="text-xs text-[#86868B] dark:text-zinc-400">
+                Track custom fitting, hemming jobs, deposits, ticket slips, and pickup notices
               </p>
             </div>
           </div>
 
           <div className="flex items-center gap-2">
-            <div className="flex items-center bg-[#F5F5F7] p-1 rounded-xl border border-[#E5E5E7]">
+            <div className="flex items-center bg-[#F5F5F7] dark:bg-zinc-800 p-1 rounded-xl border border-[#E5E5E7] dark:border-zinc-700">
               <button
+                type="button"
                 onClick={() => setActiveTab('list')}
                 className={`px-3 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
                   activeTab === 'list'
-                    ? 'bg-[#1D1D1F] text-white shadow-xs'
-                    : 'text-[#1D1D1F] hover:text-[#1D1D1F]'
+                    ? 'bg-[#1D1D1F] dark:bg-zinc-100 text-white dark:text-zinc-900 shadow-xs'
+                    : 'text-[#86868B] dark:text-zinc-400 hover:text-[#1D1D1F] dark:hover:text-zinc-200'
                 }`}
               >
                 Jobs ({orders.length})
               </button>
               <button
+                type="button"
                 onClick={() => setActiveTab('create')}
                 className={`px-3 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
                   activeTab === 'create'
-                    ? 'bg-[#1D1D1F] text-white shadow-xs'
-                    : 'text-[#1D1D1F] hover:text-[#1D1D1F]'
+                    ? 'bg-[#1D1D1F] dark:bg-zinc-100 text-white dark:text-zinc-900 shadow-xs'
+                    : 'text-[#86868B] dark:text-zinc-400 hover:text-[#1D1D1F] dark:hover:text-zinc-200'
                 }`}
               >
                 + New Job
@@ -289,8 +285,9 @@ export const AdvanceAlterationModal: React.FC<AdvanceAlterationModalProps> = ({
             </div>
 
             <button
+              type="button"
               onClick={onClose}
-              className="text-[#86868B] hover:text-[#1D1D1F] p-1 cursor-pointer"
+              className="text-[#86868B] hover:text-[#1D1D1F] dark:hover:text-white p-1.5 rounded-xl hover:bg-[#F5F5F7] dark:hover:bg-zinc-800 cursor-pointer"
             >
               <X className="w-5 h-5" />
             </button>
@@ -298,36 +295,35 @@ export const AdvanceAlterationModal: React.FC<AdvanceAlterationModalProps> = ({
         </div>
 
         {toastMessage && (
-          <div className="mt-3 p-2.5 bg-[#F5F5F7] text-[#1D1D1F] border border-[#E5E5E7] rounded-xl text-xs font-bold text-center">
+          <div className="mt-3 p-2.5 bg-[#F5F5F7] dark:bg-zinc-800 text-[#1D1D1F] dark:text-zinc-100 border border-[#E5E5E7] dark:border-zinc-700 rounded-xl text-xs font-bold text-center">
             {toastMessage}
           </div>
         )}
 
-        {/* TAB 1: LIST / TRACKER */}
         {activeTab === 'list' ? (
           <div className="flex-1 overflow-y-auto py-3 space-y-3 pr-1">
-            {/* Filter controls */}
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div className="relative flex-1 sm:w-64">
                 <Search className="w-4 h-4 text-[#86868B] absolute left-3 top-1/2 -translate-y-1/2" />
                 <input
                   type="text"
                   value={searchQuery}
-                  onChange={e => setSearchQuery(e.target.value)}
-                  placeholder="Search Token (ALT-1042) or Phone..."
-                  className="w-full h-8 pl-9 pr-3 rounded-xl border border-[#E5E5E7] text-xs font-bold bg-[#F5F5F7] text-[#1D1D1F]"
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  placeholder="Search ticket, customer, or phone..."
+                  className="w-full h-8 pl-9 pr-3 rounded-xl border border-[#E5E5E7] dark:border-zinc-700 text-xs font-bold bg-[#F5F5F7] dark:bg-zinc-800 text-[#1D1D1F] dark:text-white"
                 />
               </div>
 
               <div className="flex items-center gap-1 overflow-x-auto text-xs">
-                {(['all', 'received', 'in_progress', 'ready_for_pickup', 'delivered'] as const).map(st => (
+                {(['all', 'received', 'in_progress', 'ready_for_pickup', 'delivered'] as const).map((st) => (
                   <button
                     key={st}
+                    type="button"
                     onClick={() => setStatusFilter(st)}
                     className={`px-2.5 py-1 rounded-lg font-bold capitalize border cursor-pointer ${
                       statusFilter === st
-                        ? 'bg-[#1D1D1F] text-white border-[#1D1D1F]'
-                        : 'bg-white text-[#86868B] border-[#E5E5E7]'
+                        ? 'bg-[#1D1D1F] dark:bg-zinc-100 text-white dark:text-zinc-900 border-transparent'
+                        : 'bg-white dark:bg-zinc-800 text-[#86868B] dark:text-zinc-400 border-[#E5E5E7] dark:border-zinc-700'
                     }`}
                   >
                     {st.replace(/_/g, ' ')}
@@ -336,77 +332,84 @@ export const AdvanceAlterationModal: React.FC<AdvanceAlterationModalProps> = ({
               </div>
             </div>
 
-            {/* Orders Cards List */}
             <div className="space-y-2.5">
-              {filteredOrders.map(order => (
+              {filteredOrders.map((order) => (
                 <div
                   key={order.id}
-                  className="p-4 rounded-2xl bg-white border border-[#E5E5E7] hover:border-[#1D1D1F] transition-all space-y-2.5 shadow-2xs"
+                  className="p-4 rounded-2xl bg-white dark:bg-zinc-950 border border-[#E5E5E7] dark:border-zinc-800 hover:border-[#1D1D1F] dark:hover:border-zinc-600 transition-all space-y-2.5 shadow-2xs"
                 >
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-[#E5E5E7] pb-2">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-[#E5E5E7] dark:border-zinc-800 pb-2">
                     <div className="flex items-center gap-2.5">
-                      <span className="font-mono font-black text-sm text-[#1D1D1F] bg-[#F5F5F7] px-2 py-0.5 rounded-lg border border-[#E5E5E7]">
+                      <span className="font-mono font-black text-sm text-[#1D1D1F] dark:text-zinc-100 bg-[#F5F5F7] dark:bg-zinc-800 px-2 py-0.5 rounded-lg border border-[#E5E5E7] dark:border-zinc-700">
                         #{order.token_number}
                       </span>
-                      <span className="font-extrabold text-xs text-[#1D1D1F]">
+                      <span className="font-extrabold text-xs text-[#1D1D1F] dark:text-zinc-100">
                         {order.customer_name} {order.student_name ? `(${order.student_name})` : ''}
                       </span>
-                      <span className="text-[11px] text-[#86868B]">
+                      <span className="text-[11px] text-[#86868B] dark:text-zinc-400">
                         · {order.customer_phone}
                       </span>
                     </div>
 
                     <div className="flex items-center gap-1.5 self-end sm:self-center">
-                      <span className={`px-2 py-0.5 rounded-md text-[10px] font-extrabold capitalize ${
-                        order.status === 'delivered'
-                          ? 'bg-[#F5F5F7] text-[#86868B]'
-                          : order.status === 'ready_for_pickup'
-                          ? 'bg-emerald-100 text-emerald-800'
-                          : order.status === 'in_progress'
-                          ? 'bg-blue-100 text-blue-800'
-                          : 'bg-amber-100 text-amber-800'
-                      }`}>
+                      <span
+                        className={`px-2 py-0.5 rounded-md text-[10px] font-extrabold capitalize ${
+                          order.status === 'delivered'
+                            ? 'bg-[#F5F5F7] dark:bg-zinc-800 text-[#86868B] dark:text-zinc-400'
+                            : order.status === 'ready_for_pickup'
+                            ? 'bg-emerald-100 dark:bg-emerald-950/50 text-emerald-800 dark:text-emerald-400'
+                            : order.status === 'in_progress'
+                            ? 'bg-blue-100 dark:bg-blue-950/50 text-blue-800 dark:text-blue-400'
+                            : 'bg-amber-100 dark:bg-amber-950/50 text-amber-800 dark:text-amber-400'
+                        }`}
+                      >
                         {order.status.replace(/_/g, ' ')}
                       </span>
                     </div>
                   </div>
 
-                  {/* Items and alteration specs */}
                   <div className="text-xs space-y-1">
-                    {order.items.map(item => (
-                      <div key={item.id} className="flex justify-between bg-[#F5F5F7] p-2 rounded-xl">
+                    {order.items.map((item) => (
+                      <div
+                        key={item.id}
+                        className="flex justify-between bg-[#F5F5F7] dark:bg-zinc-900 p-2 rounded-xl border border-[#E5E5E7]/60 dark:border-zinc-800"
+                      >
                         <div>
-                          <span className="font-bold text-[#1D1D1F]">{item.product_name} ({item.size_label})</span>
+                          <span className="font-bold text-[#1D1D1F] dark:text-zinc-100">
+                            {item.product_name} ({item.size_label})
+                          </span>
                           {item.alteration_notes && (
-                            <span className="block text-[11px] text-[#1D1D1F] font-medium mt-0.5">
-                              Alteration: {item.alteration_notes}
+                            <span className="block text-[11px] text-[#515154] dark:text-zinc-400 font-medium mt-0.5">
+                              Specs: {item.alteration_notes}
                             </span>
                           )}
                         </div>
-                        <span className="font-bold text-[#1D1D1F]">₹{item.estimated_price * item.qty}</span>
+                        <span className="font-bold text-[#1D1D1F] dark:text-zinc-100 tabular-nums">
+                          {formatMoney(item.estimated_price * item.qty, shopConfig)}
+                        </span>
                       </div>
                     ))}
                   </div>
 
-                  {/* Financial Balance and Actions */}
                   <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-1 text-xs">
-                    <div className="flex items-center gap-3">
-                      <span className="text-[#86868B]">
-                        Advance: <strong>₹{order.advance_paid}</strong>
+                    <div className="flex items-center gap-3 flex-wrap">
+                      <span className="text-[#86868B] dark:text-zinc-400">
+                        Deposit: <strong className="text-[#1D1D1F] dark:text-zinc-200">{formatMoney(order.advance_paid, shopConfig)}</strong>
                       </span>
-                      <span className="font-extrabold text-[#1D1D1F]">
-                        Balance Due: ₹{order.balance_due}
+                      <span className="font-extrabold text-[#1D1D1F] dark:text-zinc-100">
+                        Balance Due: {formatMoney(order.balance_due, shopConfig)}
                       </span>
-                      <span className="text-[11px] text-[#86868B]">
-                        Target: {new Date(order.expected_delivery_date).toLocaleDateString('en-IN')}
+                      <span className="text-[11px] text-[#86868B] dark:text-zinc-400">
+                        Target: {formatDateShort(order.expected_delivery_date, shopConfig)}
                       </span>
                     </div>
 
                     <div className="flex items-center gap-2 self-end sm:self-center">
                       {order.status === 'received' && (
                         <button
+                          type="button"
                           onClick={() => handleUpdateStatus(order.id, 'in_progress')}
-                          className="px-2.5 py-1 rounded-lg bg-blue-50 text-blue-800 border border-blue-200 text-xs font-bold hover:bg-blue-100 cursor-pointer"
+                          className="px-2.5 py-1 rounded-lg bg-blue-50 dark:bg-blue-950/40 text-blue-800 dark:text-blue-300 border border-blue-200 dark:border-blue-900 text-xs font-bold hover:bg-blue-100 cursor-pointer"
                         >
                           Mark In Progress
                         </button>
@@ -414,6 +417,7 @@ export const AdvanceAlterationModal: React.FC<AdvanceAlterationModalProps> = ({
 
                       {order.status === 'in_progress' && (
                         <button
+                          type="button"
                           onClick={() => handleUpdateStatus(order.id, 'ready_for_pickup')}
                           className="px-2.5 py-1 rounded-lg bg-emerald-600 text-white text-xs font-bold hover:bg-emerald-700 cursor-pointer"
                         >
@@ -424,17 +428,18 @@ export const AdvanceAlterationModal: React.FC<AdvanceAlterationModalProps> = ({
                       {order.status === 'ready_for_pickup' && (
                         <>
                           <button
+                            type="button"
                             onClick={() => handleSendWhatsAppReady(order)}
-                            className="px-2.5 py-1 rounded-lg bg-[#F5F5F7] text-[#1D1D1F] border border-[#E5E5E7] text-xs font-bold hover:bg-[#E5E5E7] flex items-center gap-1 cursor-pointer"
-                            title="Send Ready for Pickup WhatsApp reminder"
+                            className="px-2.5 py-1 rounded-lg bg-[#F5F5F7] dark:bg-zinc-800 text-[#1D1D1F] dark:text-zinc-100 border border-[#E5E5E7] dark:border-zinc-700 text-xs font-bold hover:bg-[#E5E5E7] dark:hover:bg-zinc-700 flex items-center gap-1 cursor-pointer"
                           >
-                            <Share2 className="w-3.5 h-3.5 text-[#1D1D1F]" />
+                            <Share2 className="w-3.5 h-3.5" />
                             <span>WhatsApp Ready</span>
                           </button>
 
                           <button
+                            type="button"
                             onClick={() => handleUpdateStatus(order.id, 'delivered')}
-                            className="px-2.5 py-1 rounded-lg bg-[#1D1D1F] text-white text-xs font-extrabold hover:bg-[#333336] cursor-pointer"
+                            className="px-2.5 py-1 rounded-lg bg-[#1D1D1F] dark:bg-zinc-100 text-white dark:text-zinc-900 text-xs font-extrabold hover:bg-[#333336] dark:hover:bg-white cursor-pointer"
                           >
                             Mark Delivered
                           </button>
@@ -442,9 +447,10 @@ export const AdvanceAlterationModal: React.FC<AdvanceAlterationModalProps> = ({
                       )}
 
                       <button
+                        type="button"
                         onClick={() => handlePrintToken(order)}
-                        className="p-1.5 rounded-lg border border-[#E5E5E7] hover:bg-[#F5F5F7] text-[#86868B] hover:text-[#1D1D1F] cursor-pointer"
-                        title="Print Token Slip"
+                        className="p-1.5 rounded-lg border border-[#E5E5E7] dark:border-zinc-700 hover:bg-[#F5F5F7] dark:hover:bg-zinc-800 text-[#86868B] hover:text-[#1D1D1F] dark:hover:text-white cursor-pointer"
+                        title="Print Ticket Slip"
                       >
                         <Printer className="w-3.5 h-3.5" />
                       </button>
@@ -454,154 +460,179 @@ export const AdvanceAlterationModal: React.FC<AdvanceAlterationModalProps> = ({
               ))}
 
               {filteredOrders.length === 0 && (
-                <div className="py-12 text-center text-xs text-[#86868B]">
-                  No alteration or advance jobs match your filters.
+                <div className="py-12 text-center text-xs text-[#86868B] dark:text-zinc-400">
+                  No tailoring or alteration jobs match your filters.
                 </div>
               )}
             </div>
           </div>
         ) : (
-          /* TAB 2: CREATE NEW ADVANCE / ALTERATION ORDER */
           <form onSubmit={handleCreateOrder} className="flex-1 overflow-y-auto py-3 space-y-3.5 pr-1">
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 p-4 rounded-2xl bg-[#F5F5F7] border border-[#E5E5E7]">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 p-4 rounded-2xl bg-[#F5F5F7] dark:bg-zinc-800/60 border border-[#E5E5E7] dark:border-zinc-800">
               <div>
-                <label className="text-xs font-bold text-[#1D1D1F] block mb-1">Parent Phone Number *</label>
+                <label className="text-xs font-bold text-[#1D1D1F] dark:text-zinc-200 block mb-1">
+                  Customer Phone *
+                </label>
                 <input
                   type="text"
                   required
                   value={customerPhone}
-                  onChange={e => setCustomerPhone(e.target.value)}
-                  placeholder="+91 98765..."
-                  className="w-full h-9 px-3 rounded-xl border border-[#E5E5E7] text-xs font-bold bg-white text-[#1D1D1F]"
+                  onChange={(e) => setCustomerPhone(e.target.value)}
+                  placeholder="+91 98765 43210"
+                  className="w-full h-9 px-3 rounded-xl border border-[#E5E5E7] dark:border-zinc-700 text-xs font-bold bg-white dark:bg-zinc-900 text-[#1D1D1F] dark:text-white"
                 />
               </div>
 
               <div>
-                <label className="text-xs font-bold text-[#1D1D1F] block mb-1">Parent / Customer Name</label>
+                <label className="text-xs font-bold text-[#1D1D1F] dark:text-zinc-200 block mb-1">
+                  Customer Name
+                </label>
                 <input
                   type="text"
                   value={customerName}
-                  onChange={e => setCustomerName(e.target.value)}
-                  placeholder="e.g. Ramesh Sharma"
-                  className="w-full h-9 px-3 rounded-xl border border-[#E5E5E7] text-xs font-bold bg-white text-[#1D1D1F]"
+                  onChange={(e) => setCustomerName(e.target.value)}
+                  placeholder="e.g. Ananya Sharma"
+                  className="w-full h-9 px-3 rounded-xl border border-[#E5E5E7] dark:border-zinc-700 text-xs font-bold bg-white dark:bg-zinc-900 text-[#1D1D1F] dark:text-white"
                 />
               </div>
 
               <div>
-                <label className="text-xs font-bold text-[#1D1D1F] block mb-1">Student Name (Optional)</label>
+                <label className="text-xs font-bold text-[#1D1D1F] dark:text-zinc-200 block mb-1">
+                  Reference / Tag Note (Optional)
+                </label>
                 <input
                   type="text"
-                  value={studentName}
-                  onChange={e => setStudentName(e.target.value)}
-                  placeholder="e.g. Aryan Sharma"
-                  className="w-full h-9 px-3 rounded-xl border border-[#E5E5E7] text-xs font-bold bg-white text-[#1D1D1F]"
+                  value={referenceNote}
+                  onChange={(e) => setReferenceNote(e.target.value)}
+                  placeholder="e.g. Rack #4, Monogram tag"
+                  className="w-full h-9 px-3 rounded-xl border border-[#E5E5E7] dark:border-zinc-700 text-xs font-bold bg-white dark:bg-zinc-900 text-[#1D1D1F] dark:text-white"
                 />
               </div>
 
-              <div>
-                <label className="text-xs font-bold text-[#1D1D1F] block mb-1">Target School</label>
-                <select
-                  value={selectedSchoolId}
-                  onChange={e => setSelectedSchoolId(e.target.value)}
-                  className="w-full h-9 px-3 rounded-xl border border-[#E5E5E7] text-xs font-bold bg-white text-[#1D1D1F]"
-                >
-                  {schools.map(s => (
-                    <option key={s.id} value={s.id}>[{s.code}] {s.name}</option>
-                  ))}
-                </select>
-              </div>
+              {schools.length > 0 && (
+                <div>
+                  <label className="text-xs font-bold text-[#1D1D1F] dark:text-zinc-200 block mb-1">
+                    Account / Organization (Optional)
+                  </label>
+                  <select
+                    value={selectedSchoolId}
+                    onChange={(e) => setSelectedSchoolId(e.target.value)}
+                    className="w-full h-9 px-3 rounded-xl border border-[#E5E5E7] dark:border-zinc-700 text-xs font-bold bg-white dark:bg-zinc-900 text-[#1D1D1F] dark:text-white"
+                  >
+                    <option value="">General Walk-in</option>
+                    {schools.map((s) => (
+                      <option key={s.id} value={s.id}>
+                        [{s.code}] {s.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
             </div>
 
-            {/* Garment details */}
-            <div className="p-4 rounded-2xl bg-white border border-[#E5E5E7] space-y-3 shadow-2xs">
-              <span className="text-xs font-extrabold text-[#1D1D1F] uppercase tracking-wider block">
-                Job &amp; Alteration Specifications:
+            <div className="p-4 rounded-2xl bg-white dark:bg-zinc-950 border border-[#E5E5E7] dark:border-zinc-800 space-y-3 shadow-2xs">
+              <span className="text-xs font-extrabold text-[#1D1D1F] dark:text-zinc-100 uppercase tracking-wider block">
+                Job &amp; Alteration Specifications
               </span>
 
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <div className="sm:col-span-2">
-                  <label className="text-xs font-bold text-[#86868B] block mb-1">Garment Item</label>
+                  <label className="text-xs font-bold text-[#86868B] dark:text-zinc-400 block mb-1">
+                    Item / Garment *
+                  </label>
                   <input
                     type="text"
                     required
                     value={productName}
-                    onChange={e => setProductName(e.target.value)}
-                    placeholder="e.g. School Pant / Winter Blazer"
-                    className="w-full h-9 px-3 rounded-xl border border-[#E5E5E7] text-xs font-bold bg-white text-[#1D1D1F]"
+                    onChange={(e) => setProductName(e.target.value)}
+                    placeholder="e.g. Tailored Wool Trousers / Blazer"
+                    className="w-full h-9 px-3 rounded-xl border border-[#E5E5E7] dark:border-zinc-700 text-xs font-bold bg-white dark:bg-zinc-900 text-[#1D1D1F] dark:text-white"
                   />
                 </div>
 
                 <div>
-                  <label className="text-xs font-bold text-[#86868B] block mb-1">Size</label>
+                  <label className="text-xs font-bold text-[#86868B] dark:text-zinc-400 block mb-1">
+                    Size / Variant
+                  </label>
                   <input
                     type="text"
                     value={sizeLabel}
-                    onChange={e => setSizeLabel(e.target.value)}
-                    placeholder="e.g. 28 / 30"
-                    className="w-full h-9 px-3 rounded-xl border border-[#E5E5E7] text-xs font-bold bg-white text-[#1D1D1F]"
+                    onChange={(e) => setSizeLabel(e.target.value)}
+                    placeholder="e.g. M / 32"
+                    className="w-full h-9 px-3 rounded-xl border border-[#E5E5E7] dark:border-zinc-700 text-xs font-bold bg-white dark:bg-zinc-900 text-[#1D1D1F] dark:text-white"
                   />
                 </div>
               </div>
 
               <div>
-                <label className="text-xs font-bold text-[#86868B] block mb-1">
-                  Specific Alteration Instructions *
+                <label className="text-xs font-bold text-[#86868B] dark:text-zinc-400 block mb-1">
+                  Tailoring / Alteration Notes *
                 </label>
                 <textarea
                   rows={2}
                   required
                   value={alterationNotes}
-                  onChange={e => setAlterationNotes(e.target.value)}
-                  placeholder="e.g. Hem length shorten by 2 inches, fix waist elastic, name embroidery 'Aarav'"
-                  className="w-full p-2.5 rounded-xl border border-[#E5E5E7] text-xs font-semibold bg-white text-[#1D1D1F]"
+                  onChange={(e) => setAlterationNotes(e.target.value)}
+                  placeholder="e.g. Hem inseam to 30 inches, taper sleeves by 0.5 in"
+                  className="w-full p-2.5 rounded-xl border border-[#E5E5E7] dark:border-zinc-700 text-xs font-semibold bg-white dark:bg-zinc-900 text-[#1D1D1F] dark:text-white"
                 />
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <div>
-                  <label className="text-xs font-bold text-[#86868B] block mb-1">Total Estimated (₹)</label>
+                  <label className="text-xs font-bold text-[#86868B] dark:text-zinc-400 block mb-1">
+                    Total Estimate ({currSymbol})
+                  </label>
                   <input
                     type="number"
+                    step="0.01"
                     value={estimatedPrice}
-                    onChange={e => setEstimatedPrice(e.target.value)}
-                    className="w-full h-9 px-3 rounded-xl border border-[#E5E5E7] text-xs font-bold bg-white text-[#1D1D1F]"
+                    onChange={(e) => setEstimatedPrice(e.target.value)}
+                    placeholder="0.00"
+                    className="w-full h-9 px-3 rounded-xl border border-[#E5E5E7] dark:border-zinc-700 text-xs font-bold bg-white dark:bg-zinc-900 text-[#1D1D1F] dark:text-white"
                   />
                 </div>
 
                 <div>
-                  <label className="text-xs font-bold text-[#86868B] block mb-1">Advance Received (₹)</label>
+                  <label className="text-xs font-bold text-[#86868B] dark:text-zinc-400 block mb-1">
+                    Deposit Received ({currSymbol})
+                  </label>
                   <input
                     type="number"
+                    step="0.01"
                     value={advancePaid}
-                    onChange={e => setAdvancePaid(e.target.value)}
-                    className="w-full h-9 px-3 rounded-xl border border-[#E5E5E7] text-xs font-bold bg-white text-[#1D1D1F]"
+                    onChange={(e) => setAdvancePaid(e.target.value)}
+                    className="w-full h-9 px-3 rounded-xl border border-[#E5E5E7] dark:border-zinc-700 text-xs font-bold bg-white dark:bg-zinc-900 text-[#1D1D1F] dark:text-white"
                   />
                 </div>
 
                 <div>
-                  <label className="text-xs font-bold text-[#86868B] block mb-1">Target Delivery Date</label>
+                  <label className="text-xs font-bold text-[#86868B] dark:text-zinc-400 block mb-1">
+                    Target Pickup Date
+                  </label>
                   <input
                     type="date"
                     value={deliveryDate}
-                    onChange={e => setDeliveryDate(e.target.value)}
-                    className="w-full h-9 px-3 rounded-xl border border-[#E5E5E7] text-xs font-bold bg-white text-[#1D1D1F]"
+                    onChange={(e) => setDeliveryDate(e.target.value)}
+                    className="w-full h-9 px-3 rounded-xl border border-[#E5E5E7] dark:border-zinc-700 text-xs font-bold bg-white dark:bg-zinc-900 text-[#1D1D1F] dark:text-white"
                   />
                 </div>
               </div>
 
-              {/* Advance Payment Mode Selector */}
               <div className="flex items-center justify-between pt-1">
-                <span className="text-xs font-bold text-[#86868B]">Advance Payment Mode:</span>
+                <span className="text-xs font-bold text-[#86868B] dark:text-zinc-400">
+                  Deposit Payment Mode:
+                </span>
                 <div className="flex items-center gap-1.5">
-                  {(['cash', 'upi', 'card'] as PaymentMethod[]).map(pm => (
+                  {(['cash', 'card', ...(shopConfig?.upi_id ? ['upi'] : [])] as PaymentMethod[]).map((pm) => (
                     <button
                       key={pm}
                       type="button"
                       onClick={() => setAdvancePaymentMethod(pm)}
-                      className={`px-3 py-1 rounded-lg text-xs font-bold capitalize border transition-all cursor-pointer ${
+                      className={`px-3 py-1 rounded-lg text-xs font-bold uppercase border transition-all cursor-pointer ${
                         advancePaymentMethod === pm
-                          ? 'bg-[#1D1D1F] text-white border-[#1D1D1F] shadow-2xs'
-                          : 'bg-[#F5F5F7] text-[#1D1D1F] border-[#E5E5E7]'
+                          ? 'bg-[#1D1D1F] dark:bg-zinc-100 text-white dark:text-zinc-900 border-transparent shadow-2xs'
+                          : 'bg-[#F5F5F7] dark:bg-zinc-800 text-[#1D1D1F] dark:text-zinc-300 border-[#E5E5E7] dark:border-zinc-700'
                       }`}
                     >
                       {pm}
@@ -610,23 +641,22 @@ export const AdvanceAlterationModal: React.FC<AdvanceAlterationModalProps> = ({
                 </div>
               </div>
 
-              {/* Live Dynamic UPI QR for Advance */}
               {advancePaymentMethod === 'upi' && advanceAmount > 0 && advanceUpiQr && (
-                <div className="p-3.5 rounded-2xl bg-[#F5F5F7] border border-[#E5E5E7] shadow-2xs flex flex-col sm:flex-row items-center justify-between gap-3 animate-in fade-in">
+                <div className="p-3.5 rounded-2xl bg-[#F5F5F7] dark:bg-zinc-900 border border-[#E5E5E7] dark:border-zinc-800 flex flex-col sm:flex-row items-center justify-between gap-3">
                   <div className="flex items-center gap-3">
-                    <div className="p-1.5 bg-white border border-[#E5E5E7] rounded-xl shadow-xs">
+                    <div className="p-1.5 bg-white border border-[#E5E5E7] rounded-xl">
                       <img src={advanceUpiQr} alt="Advance UPI QR" className="w-20 h-20 object-contain" />
                     </div>
                     <div className="space-y-1">
-                      <div className="flex items-center gap-1 text-[#1D1D1F] font-extrabold text-xs">
+                      <div className="flex items-center gap-1 text-[#1D1D1F] dark:text-zinc-100 font-extrabold text-xs">
                         <QrCode className="w-3.5 h-3.5" />
-                        <span>Dynamic Advance QR</span>
+                        <span>Dynamic Deposit QR</span>
                       </div>
-                      <div className="text-sm font-black text-[#1D1D1F]">
-                        Amount: ₹{advanceAmount}
+                      <div className="text-sm font-black text-[#1D1D1F] dark:text-zinc-100">
+                        Amount: {formatMoney(advanceAmount, shopConfig)}
                       </div>
-                      <div className="text-[10px] font-mono text-[#86868B]">
-                        UPI: {shopConfig?.upi_id || '9876543210@upi'}
+                      <div className="text-[10px] font-mono text-[#86868B] dark:text-zinc-400">
+                        UPI: {shopConfig?.upi_id}
                       </div>
                     </div>
                   </div>
@@ -634,17 +664,19 @@ export const AdvanceAlterationModal: React.FC<AdvanceAlterationModalProps> = ({
                   <button
                     type="button"
                     onClick={() => setShowStandeeQr(true)}
-                    className="px-3 py-1.5 rounded-xl bg-white hover:bg-[#F5F5F7] text-[#1D1D1F] text-xs font-bold border border-[#E5E5E7] flex items-center gap-1.5 cursor-pointer"
+                    className="px-3 py-1.5 rounded-xl bg-white dark:bg-zinc-800 hover:bg-[#F5F5F7] text-[#1D1D1F] dark:text-zinc-100 text-xs font-bold border border-[#E5E5E7] dark:border-zinc-700 flex items-center gap-1.5 cursor-pointer"
                   >
                     <Maximize2 className="w-3.5 h-3.5" />
-                    <span>Standee</span>
+                    <span>Fullscreen QR</span>
                   </button>
                 </div>
               )}
 
-              <div className="p-3 rounded-xl bg-[#F5F5F7] border border-[#E5E5E7] flex items-center justify-between text-xs">
-                <span className="text-[#86868B]">Balance Due on Pickup:</span>
-                <span className="text-sm font-extrabold text-[#1D1D1F]">₹{balanceDue}</span>
+              <div className="p-3 rounded-xl bg-[#F5F5F7] dark:bg-zinc-900 border border-[#E5E5E7] dark:border-zinc-800 flex items-center justify-between text-xs">
+                <span className="text-[#86868B] dark:text-zinc-400">Balance Due on Pickup:</span>
+                <span className="text-sm font-extrabold text-[#1D1D1F] dark:text-zinc-100 tabular-nums">
+                  {formatMoney(balanceDue, shopConfig)}
+                </span>
               </div>
             </div>
 
@@ -652,7 +684,7 @@ export const AdvanceAlterationModal: React.FC<AdvanceAlterationModalProps> = ({
               <button
                 type="button"
                 onClick={() => setActiveTab('list')}
-                className="px-4 py-2 rounded-xl border border-[#E5E5E7] text-xs font-bold text-[#86868B] hover:bg-[#F5F5F7] cursor-pointer"
+                className="px-4 py-2 rounded-xl border border-[#E5E5E7] dark:border-zinc-700 text-xs font-bold text-[#86868B] dark:text-zinc-400 hover:bg-[#F5F5F7] dark:hover:bg-zinc-800 cursor-pointer"
               >
                 Cancel
               </button>
@@ -660,57 +692,53 @@ export const AdvanceAlterationModal: React.FC<AdvanceAlterationModalProps> = ({
               <button
                 type="submit"
                 disabled={isSubmitting}
-                className="px-5 py-2.5 rounded-xl bg-[#1D1D1F] text-white text-xs font-extrabold hover:bg-[#333336] shadow-xs cursor-pointer"
+                className="px-5 py-2.5 rounded-xl bg-[#1D1D1F] dark:bg-zinc-100 text-white dark:text-zinc-900 text-xs font-extrabold hover:bg-[#333336] dark:hover:bg-white shadow-xs cursor-pointer"
               >
-                {isSubmitting ? 'Creating Job...' : 'Save Job & Print Token Slip'}
+                {isSubmitting ? 'Creating Job...' : 'Save Job Ticket'}
               </button>
             </div>
           </form>
         )}
-
       </div>
 
-      {/* Standee Fullscreen QR Modal for Advance Deposit */}
       {showStandeeQr && advanceUpiQr && (
         <div className="fixed inset-0 z-60 bg-black/80 flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl p-6 sm:p-8 max-w-sm w-full text-center shadow-2xl space-y-4 animate-in fade-in-50 border-4 border-[#1D1D1F]">
+          <div className="bg-white dark:bg-zinc-900 rounded-3xl p-6 sm:p-8 max-w-sm w-full text-center shadow-2xl space-y-4 border border-[#E5E5E7] dark:border-zinc-700">
             <div className="flex items-center justify-between">
-              <span className="text-xs font-black uppercase text-[#1D1D1F] tracking-wider">
-                {shopConfig?.legal_name || 'SARASWATI GARMENTS'}
+              <span className="text-xs font-black uppercase text-[#1D1D1F] dark:text-zinc-100 tracking-wider">
+                {shopConfig?.legal_name || 'SikkaDesk Store'}
               </span>
               <button
+                type="button"
                 onClick={() => setShowStandeeQr(false)}
-                className="text-[#86868B] hover:text-[#1D1D1F] p-1 cursor-pointer"
+                className="text-[#86868B] hover:text-[#1D1D1F] dark:hover:text-white p-1 cursor-pointer"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
-            <h3 className="font-extrabold text-base text-[#1D1D1F]">
-              Scan &amp; Pay Advance Deposit
+            <h3 className="font-extrabold text-base text-[#1D1D1F] dark:text-zinc-100">
+              Scan &amp; Pay Deposit
             </h3>
 
             <div className="p-3 bg-white border-2 border-dashed border-[#E5E5E7] rounded-2xl flex justify-center">
               <img src={advanceUpiQr} alt="UPI QR Standee" className="w-56 h-56 object-contain" />
             </div>
 
-            <div className="p-3 rounded-2xl bg-[#F5F5F7] border border-[#E5E5E7]">
-              <div className="text-xs text-[#86868B]">Advance Amount:</div>
-              <div className="text-3xl font-mono font-black text-[#1D1D1F]">
-                ₹{advanceAmount}
+            <div className="p-3 rounded-2xl bg-[#F5F5F7] dark:bg-zinc-800 border border-[#E5E5E7] dark:border-zinc-700">
+              <div className="text-xs text-[#86868B] dark:text-zinc-400">Deposit Amount</div>
+              <div className="text-3xl font-mono font-black text-[#1D1D1F] dark:text-zinc-100">
+                {formatMoney(advanceAmount, shopConfig)}
               </div>
-              <div className="text-[11px] font-mono text-[#86868B] mt-1">
-                UPI: {shopConfig?.upi_id || '9876543210@upi'}
+              <div className="text-[11px] font-mono text-[#86868B] dark:text-zinc-400 mt-1">
+                UPI: {shopConfig?.upi_id}
               </div>
             </div>
 
-            <p className="text-[11px] text-[#86868B]">
-              Supports GPay, PhonePe, Paytm, BHIM &amp; Banking UPI apps
-            </p>
-
             <button
+              type="button"
               onClick={() => setShowStandeeQr(false)}
-              className="w-full py-2.5 rounded-xl bg-[#1D1D1F] text-white font-extrabold text-xs hover:bg-[#333336] cursor-pointer"
+              className="w-full py-2.5 rounded-xl bg-[#1D1D1F] dark:bg-zinc-100 text-white dark:text-zinc-900 font-extrabold text-xs hover:bg-[#333336] dark:hover:bg-white cursor-pointer"
             >
               Done / Return to Counter
             </button>

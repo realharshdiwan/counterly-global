@@ -1,15 +1,7 @@
 import React, { useState } from 'react';
-import { 
-  FileSpreadsheet, 
-  Upload, 
-  Download, 
-  CheckCircle2, 
-  AlertCircle, 
-  X, 
-  Layers 
-} from 'lucide-react';
+import { FileSpreadsheet, Upload, Download, CheckCircle2, AlertCircle, X } from 'lucide-react';
 import { db } from '../db/db';
-import { type School, type Product, type SizeItem, type PriceEntry, type ProductStock } from '../types';
+import { type Product, type ProductVariant } from '../types';
 
 interface CsvRateUploadModalProps {
   isOpen: boolean;
@@ -18,11 +10,15 @@ interface CsvRateUploadModalProps {
 }
 
 interface ParsedCsvRow {
-  schoolCode: string;
   productName: string;
   category: string;
   sizeLabel: string;
+  colorLabel: string;
+  sku: string;
+  barcode: string;
   price: number;
+  costPrice?: number;
+  taxRate?: number;
   stock: number;
   status: 'valid' | 'invalid';
   error?: string;
@@ -40,30 +36,37 @@ export const CsvRateUploadModal: React.FC<CsvRateUploadModalProps> = ({
 
   if (!isOpen) return null;
 
-  // Download Sample CSV
   const handleDownloadSampleCsv = () => {
-    const headers = ['School_Code', 'Product_Name', 'Category', 'Size_Label', 'Price', 'Stock'];
+    const headers = [
+      'Product_Name',
+      'Category',
+      'Size',
+      'Color',
+      'SKU',
+      'Barcode',
+      'Price',
+      'Cost_Price',
+      'Tax_Rate',
+      'Stock',
+    ];
     const sampleRows = [
-      ['DAV', 'Half Sleeve School Shirt', 'uniform', '28', '260', '15'],
-      ['DAV', 'Half Sleeve School Shirt', 'uniform', '30', '280', '15'],
-      ['DAV', 'School Pant / Trousers', 'uniform', '28', '340', '10'],
-      ['DAV', 'School Pant / Trousers', 'uniform', '30', '360', '10'],
-      ['DAV', 'School Tie', 'accessories', 'Free', '80', '50'],
-      ['DPS', 'Full Sleeve School Shirt', 'uniform', '32', '320', '20'],
-      ['DPS', 'Black School Shoes', 'footwear', '6', '460', '8'],
+      ['Heavyweight Crew Tee', 'tops', 'M', 'Black', 'TEE-BLK-M', '890100101', '799', '340', '0', '15'],
+      ['Heavyweight Crew Tee', 'tops', 'L', 'Black', 'TEE-BLK-L', '890100102', '799', '340', '0', '12'],
+      ['Relaxed Tapered Denim', 'bottoms', '32', 'Indigo', 'DNM-IND-32', '890100201', '1899', '850', '0', '10'],
+      ['Low-Top Court Sneaker', 'footwear', 'UK 9', 'White', 'SNK-WHT-9', '890100301', '2499', '1150', '0', '8'],
+      ['Waxed Canvas Tote', 'accessories', 'One Size', 'Olive', 'TOT-OLV-OS', '890100401', '699', '280', '0', '20'],
     ];
 
-    const csvContent = 'data:text/csv;charset=utf-8,' + [headers.join(','), ...sampleRows.map(r => r.join(','))].join('\n');
-    const encodedUri = encodeURI(csvContent);
+    const csvContent =
+      'data:text/csv;charset=utf-8,' + [headers.join(','), ...sampleRows.map(r => r.join(','))].join('\n');
     const link = document.createElement('a');
-    link.setAttribute('href', encodedUri);
-    link.setAttribute('download', `Uniform_Rate_Template_${new Date().toISOString().slice(0, 10)}.csv`);
+    link.setAttribute('href', encodeURI(csvContent));
+    link.setAttribute('download', `SikkaDesk_Catalog_Template_${new Date().toISOString().slice(0, 10)}.csv`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
   };
 
-  // Parse Uploaded CSV file
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -72,40 +75,92 @@ export const CsvRateUploadModal: React.FC<CsvRateUploadModalProps> = ({
     setErrorMsg(null);
 
     const reader = new FileReader();
-    reader.onload = (event) => {
+    reader.onload = event => {
       const text = event.target?.result as string;
       if (!text) return;
 
       const lines = text.split(/\r\n|\n/).map(l => l.trim()).filter(Boolean);
       if (lines.length < 2) {
-        setErrorMsg('CSV file is empty or missing headers');
+        setErrorMsg('CSV file is empty or missing headers.');
         return;
       }
 
+      const headerCols = lines[0].toLowerCase().split(',').map(h => h.trim().replace(/[^a-z0-9_]/g, ''));
+      const isLegacySchoolCsv = headerCols[0]?.includes('school');
+
+      const findCol = (aliases: string[]) => headerCols.findIndex(h => aliases.includes(h));
+      const idxName = findCol(['product_name', 'product', 'name', 'item']);
+      const idxCat = findCol(['category', 'cat']);
+      const idxSize = findCol(['size', 'size_label']);
+      const idxColor = findCol(['color', 'colour', 'color_label']);
+      const idxSku = findCol(['sku']);
+      const idxBarcode = findCol(['barcode', 'ean', 'upc']);
+      const idxPrice = findCol(['price', 'retail_price', 'selling_price']);
+      const idxCost = findCol(['cost_price', 'cost', 'unit_cost', 'cogs']);
+      const idxTax = findCol(['tax_rate', 'tax', 'vat', 'gst']);
+      const idxStock = findCol(['stock', 'stock_qty', 'qty', 'quantity']);
+
       const rows: ParsedCsvRow[] = [];
-      // Skip header line
       for (let i = 1; i < lines.length; i++) {
         const parts = lines[i].split(',').map(p => p.trim().replace(/^["']|["']$/g, ''));
-        if (parts.length < 5) continue;
+        if (parts.length < 4) continue;
 
-        const schoolCode = (parts[0] || '').toUpperCase();
-        const productName = parts[1] || '';
-        const catRaw = (parts[2] || 'uniform').toLowerCase();
-        const category = catRaw || 'uniform';
-        const sizeLabel = parts[3] || 'Free';
-        const price = parseFloat(parts[4]) || 0;
-        const stock = parseInt(parts[5], 10) || 10;
+        let productName = '';
+        let category = 'tops';
+        let sizeLabel = 'One Size';
+        let colorLabel = 'Standard';
+        let sku = '';
+        let barcode = '';
+        let price = 0;
+        let costPrice: number | undefined = undefined;
+        let taxRate: number | undefined = undefined;
+        let stock = 10;
 
-        const isValid = Boolean(schoolCode && productName && price > 0);
+        if (isLegacySchoolCsv) {
+          productName = parts[1] || '';
+          category = (parts[2] || 'tops').toLowerCase();
+          sizeLabel = parts[3] || 'One Size';
+          price = parseFloat(parts[4]) || 0;
+          stock = parseInt(parts[5], 10) || 10;
+        } else {
+          productName = parts[idxName >= 0 ? idxName : 0] || '';
+          category = (parts[idxCat >= 0 ? idxCat : 1] || 'tops').toLowerCase().replace(/[^a-z0-9]+/g, '_');
+          sizeLabel = parts[idxSize >= 0 ? idxSize : 2] || 'One Size';
+          colorLabel = parts[idxColor >= 0 ? idxColor : 3] || 'Standard';
+          sku = (parts[idxSku >= 0 ? idxSku : 4] || '').toUpperCase();
+          barcode = parts[idxBarcode >= 0 ? idxBarcode : 5] || '';
+          price = parseFloat(parts[idxPrice >= 0 ? idxPrice : 6]) || 0;
+
+          if (idxCost >= 0 && parts[idxCost] !== '' && parts[idxCost] !== undefined) {
+            const c = parseFloat(parts[idxCost]);
+            if (!isNaN(c) && c >= 0) costPrice = c;
+          }
+          if (idxTax >= 0 && parts[idxTax] !== '' && parts[idxTax] !== undefined) {
+            const t = parseFloat(parts[idxTax]);
+            if (!isNaN(t) && t >= 0) taxRate = t;
+          }
+          const stockCol = idxStock >= 0 ? idxStock : parts.length >= 10 ? 9 : 7;
+          stock = parseInt(parts[stockCol], 10) || 0;
+        }
+
+        const prefix = (productName.replace(/[^a-zA-Z0-9]/g, '').slice(0, 4) || 'ITEM').toUpperCase();
+        if (!sku) sku = `${prefix}-${sizeLabel.replace(/\s+/g, '').toUpperCase()}-${i}`;
+        if (!barcode) barcode = `${Date.now().toString().slice(-6)}${i}`;
+
+        const valid = Boolean(productName && price >= 0);
         rows.push({
-          schoolCode,
           productName,
           category,
           sizeLabel,
+          colorLabel,
+          sku,
+          barcode,
           price,
+          costPrice,
+          taxRate,
           stock,
-          status: isValid ? 'valid' : 'invalid',
-          error: !schoolCode ? 'Missing School Code' : !productName ? 'Missing Product' : price <= 0 ? 'Invalid Price' : undefined,
+          status: valid ? 'valid' : 'invalid',
+          error: !productName ? 'Missing Product Name' : undefined,
         });
       }
 
@@ -115,255 +170,196 @@ export const CsvRateUploadModal: React.FC<CsvRateUploadModalProps> = ({
     reader.readAsText(file);
   };
 
-  // Commit Parsed CSV to Dexie DB
   const handleCommitImport = async () => {
     const validRows = parsedRows.filter(r => r.status === 'valid');
-    if (validRows.length === 0) {
-      setErrorMsg('No valid rows found to import');
-      return;
-    }
+    if (validRows.length === 0) return;
 
     setIsProcessing(true);
-    setErrorMsg(null);
-
     try {
-      const [existingSchools, existingProducts, existingSizes, existingSizeGroups] = await Promise.all([
-        db.schools.toArray(),
+      const [existingProducts, existingCategories] = await Promise.all([
         db.products.toArray(),
-        db.sizes.toArray(),
-        db.size_groups.toArray(),
+        db.categories.toArray(),
       ]);
 
-      const schoolsMap = new Map(existingSchools.map(s => [s.code.toUpperCase(), s]));
-      const productsMap = new Map(existingProducts.map(p => [p.name.toLowerCase(), p]));
-      const sizesMap = new Map(existingSizes.map(s => [s.label.toLowerCase(), s]));
+      const catSet = new Set(existingCategories.map(c => c.id.toLowerCase()));
+      const prodMap = new Map<string, Product>();
+      existingProducts.forEach(p => prodMap.set(p.name.toLowerCase(), p));
 
-      const newSchoolsToPut: School[] = [];
-      const newProductsToPut: Product[] = [];
-      const newSizesToPut: SizeItem[] = [];
-      const pricesToPut: PriceEntry[] = [];
-      const stocksToPut: ProductStock[] = [];
+      const variantsToPut: ProductVariant[] = [];
 
       for (const row of validRows) {
-        // 1. School check/create
-        let school = schoolsMap.get(row.schoolCode);
-        if (!school) {
-          const newSchool: School = {
-            id: `sch_${row.schoolCode.toLowerCase()}_${Date.now().toString(36)}`,
-            code: row.schoolCode,
-            name: `${row.schoolCode} Public School`,
-            active: true,
-          };
-          schoolsMap.set(row.schoolCode, newSchool);
-          newSchoolsToPut.push(newSchool);
-          school = newSchool;
+        if (!catSet.has(row.category)) {
+          await db.categories.put({
+            id: row.category,
+            name: row.category.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()),
+            sort_order: catSet.size + 1,
+          });
+          catSet.add(row.category);
         }
 
-        // 2. Size check/create if not free
-        const isFree = row.sizeLabel.toLowerCase() === 'free' || row.sizeLabel === '-';
-        let sizeId: string | null = null;
-        if (!isFree) {
-          let size = sizesMap.get(row.sizeLabel.toLowerCase());
-          if (!size) {
-            const defaultSgId = 'sg_custom_sizes';
-            if (!existingSizeGroups.some(sg => sg.id === defaultSgId)) {
-              await db.size_groups.put({ id: defaultSgId, name: 'Imported Sizes' });
-            }
-            const newSize: SizeItem = {
-              id: `sz_${row.sizeLabel.toLowerCase()}`,
-              size_group_id: defaultSgId,
-              label: row.sizeLabel,
-              sort_order: parseInt(row.sizeLabel, 10) || 50,
-            };
-            sizesMap.set(row.sizeLabel.toLowerCase(), newSize);
-            newSizesToPut.push(newSize);
-            size = newSize;
-          }
-          sizeId = size.id;
-        }
-
-        // 3. Product check/create
-        let product = productsMap.get(row.productName.toLowerCase());
-        if (!product) {
-          const newProd: Product = {
-            id: `p_${row.productName.toLowerCase().replace(/[^a-z0-9]/g, '_')}_${Date.now().toString(36)}`,
+        let prod = prodMap.get(row.productName.toLowerCase());
+        if (!prod) {
+          const prodId = `prod_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+          prod = {
+            id: prodId,
             name: row.productName,
             category: row.category,
-            size_group_id: isFree ? null : 'sg_custom_sizes',
+            sku_prefix: row.sku.split('-')[0] || 'ITEM',
+            has_variants: true,
+            size_group_id: null,
             base_price: row.price,
+            cost_price: row.costPrice,
+            tax_rate: row.taxRate,
             stock: row.stock,
             low_stock_threshold: 5,
+            active: true,
           };
-          productsMap.set(row.productName.toLowerCase(), newProd);
-          newProductsToPut.push(newProd);
-          product = newProd;
+          await db.products.add(prod);
+          prodMap.set(row.productName.toLowerCase(), prod);
         }
 
-        // 4. Price Entry
-        const priceId = `pr_${school.id}_${product.id}_${sizeId || 'null'}`;
-        pricesToPut.push({
-          id: priceId,
-          school_id: school.id,
-          product_id: product.id,
-          size_id: sizeId,
+        variantsToPut.push({
+          id: `var_${prod.id}_${row.sku.toLowerCase()}`,
+          product_id: prod.id,
+          size_label: row.sizeLabel,
+          color_label: row.colorLabel,
+          sku: row.sku,
+          barcode: row.barcode,
           price: row.price,
-        });
-
-        // 5. Stock Entry
-        const stockId = `${product.id}_${sizeId || 'free'}`;
-        stocksToPut.push({
-          id: stockId,
-          product_id: product.id,
-          size_id: sizeId,
-          size_label: isFree ? 'Free' : row.sizeLabel,
-          quantity: row.stock,
-          min_stock: 5,
+          cost_price: row.costPrice ?? prod.cost_price,
+          tax_rate: row.taxRate ?? prod.tax_rate,
+          stock_qty: row.stock,
+          low_stock_threshold: 5,
         });
       }
 
-      if (newSchoolsToPut.length > 0) await db.schools.bulkPut(newSchoolsToPut);
-      if (newSizesToPut.length > 0) await db.sizes.bulkPut(newSizesToPut);
-      if (newProductsToPut.length > 0) await db.products.bulkPut(newProductsToPut);
-      if (pricesToPut.length > 0) await db.price_list.bulkPut(pricesToPut);
-      if (stocksToPut.length > 0) await db.stocks.bulkPut(stocksToPut);
+      if (variantsToPut.length > 0) {
+        await db.variants.bulkPut(variantsToPut);
+      }
 
       onImportComplete();
       onClose();
-    } catch (err) {
-      console.error('Error importing CSV:', err);
-      setErrorMsg('Failed to save imported CSV records');
+    } catch (err: any) {
+      setErrorMsg(err?.message || 'Failed to import CSV rows.');
     } finally {
       setIsProcessing(false);
     }
   };
 
+  const validCount = parsedRows.filter(r => r.status === 'valid').length;
+
   return (
-    <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4 overflow-y-auto">
-      <div className="bg-white rounded-2xl max-w-3xl w-full p-6 sm:p-7 shadow-xl border border-[#E5E5E7] animate-in fade-in-50 max-h-[90vh] flex flex-col my-auto">
-        
-        {/* Header */}
-        <div className="flex items-center justify-between pb-4 border-b border-[#E5E5E7]">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-2xl bg-[#1D1D1F] text-white flex items-center justify-center shadow-xs">
-              <FileSpreadsheet className="w-5 h-5" />
+    <div className="fixed inset-0 z-50 bg-zinc-950/70 backdrop-blur-sm flex items-center justify-center p-4">
+      <div className="bg-white dark:bg-zinc-900 rounded-2xl max-w-2xl w-full shadow-2xl border border-zinc-200 dark:border-zinc-800 overflow-hidden flex flex-col max-h-[90vh]">
+        <div className="px-6 py-4 border-b border-zinc-200 dark:border-zinc-800 flex items-center justify-between">
+          <div className="flex items-center gap-2.5">
+            <div className="w-8 h-8 rounded-lg bg-zinc-950 dark:bg-zinc-100 text-white dark:text-zinc-950 flex items-center justify-center">
+              <FileSpreadsheet className="w-4 h-4" />
             </div>
             <div>
-              <h2 className="font-extrabold text-lg text-[#1D1D1F]">Excel / CSV Bulk Rate Uploader</h2>
-              <p className="text-xs text-[#86868B]">
-                Upload school uniform price matrices, categories, sizes, and stock counts in bulk
+              <h2 className="font-semibold text-sm text-zinc-950 dark:text-zinc-50">Import Products &amp; Variants (CSV)</h2>
+              <p className="text-xs text-zinc-500 dark:text-zinc-400">
+                Upload catalog spreadsheet with SKU, barcode, price, unit cost, tax rate, and stock
               </p>
             </div>
           </div>
-
-          <button
-            onClick={onClose}
-            className="text-[#86868B] hover:text-[#1D1D1F] p-1 cursor-pointer"
-          >
-            <X className="w-5 h-5" />
+          <button type="button" onClick={onClose} className="p-1.5 text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100 cursor-pointer">
+            <X className="w-4 h-4" />
           </button>
         </div>
 
-        {errorMsg && (
-          <div className="mt-3 p-2.5 bg-red-50 text-red-900 border border-red-200 rounded-xl text-xs font-bold flex items-center gap-1.5">
-            <AlertCircle className="w-4 h-4 text-red-600 shrink-0" />
-            <span>{errorMsg}</span>
-          </div>
-        )}
+        <div className="p-6 space-y-4 overflow-y-auto flex-1">
+          {errorMsg && (
+            <div className="p-3 rounded-lg bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-800 text-xs text-rose-700 dark:text-rose-300 flex items-center gap-2">
+              <AlertCircle className="w-4 h-4 shrink-0" />
+              <span>{errorMsg}</span>
+            </div>
+          )}
 
-        {/* Action Controls */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-4">
-          <button
-            onClick={handleDownloadSampleCsv}
-            className="p-3.5 rounded-2xl bg-[#F5F5F7] border border-[#E5E5E7] hover:bg-[#E5E5E7] transition-all flex items-center gap-3 text-left group cursor-pointer"
-          >
-            <Download className="w-5 h-5 text-[#1D1D1F] group-hover:scale-110 transition-transform" />
+          <div className="flex flex-wrap items-center justify-between gap-3 p-4 rounded-xl bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800">
             <div>
-              <span className="font-extrabold text-xs text-[#1D1D1F] block">Download CSV Template</span>
-              <span className="text-[11px] text-[#86868B]">Ready-to-use columns format</span>
+              <div className="text-xs font-semibold text-zinc-900 dark:text-zinc-100">CSV Template</div>
+              <div className="text-xs text-zinc-500 dark:text-zinc-400 font-mono">
+                Product_Name, Category, Size, Color, SKU, Barcode, Price, Cost_Price, Tax_Rate, Stock
+              </div>
             </div>
-          </button>
+            <button
+              type="button"
+              onClick={handleDownloadSampleCsv}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-xs font-semibold text-zinc-800 dark:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 cursor-pointer"
+            >
+              <Download className="w-3.5 h-3.5" />
+              <span>Download Template</span>
+            </button>
+          </div>
 
-          <label className="p-3.5 rounded-2xl bg-white border border-[#E5E5E7] hover:border-[#1D1D1F] transition-all flex items-center gap-3 cursor-pointer group shadow-2xs">
-            <Upload className="w-5 h-5 text-[#1D1D1F] group-hover:scale-110 transition-transform" />
-            <div className="flex-1 truncate">
-              <span className="font-extrabold text-xs text-[#1D1D1F] block truncate">
-                {fileName || 'Select CSV / Excel File'}
-              </span>
-              <span className="text-[11px] text-[#86868B]">Upload price sheet</span>
+          <label className="block border-2 border-dashed border-zinc-300 dark:border-zinc-700 rounded-xl p-6 text-center cursor-pointer hover:border-zinc-500 dark:hover:border-zinc-500 transition-colors">
+            <Upload className="w-6 h-6 text-zinc-400 mx-auto mb-2" />
+            <div className="text-xs font-semibold text-zinc-900 dark:text-zinc-100">
+              {fileName ? fileName : 'Click to choose a .csv file'}
             </div>
-            <input
-              type="file"
-              accept=".csv"
-              onChange={handleFileUpload}
-              className="hidden"
-            />
+            <div className="text-[11px] text-zinc-500 dark:text-zinc-400 mt-1">
+              Supports Cost_Price &amp; Tax_Rate columns as well as 8-column retail sheets
+            </div>
+            <input type="file" accept=".csv" onChange={handleFileUpload} className="hidden" />
           </label>
+
+          {parsedRows.length > 0 && (
+            <div className="border border-zinc-200 dark:border-zinc-800 rounded-xl overflow-hidden">
+              <div className="px-4 py-2.5 bg-zinc-50 dark:bg-zinc-950 border-b border-zinc-200 dark:border-zinc-800 text-xs font-semibold flex items-center justify-between">
+                <span>Preview ({parsedRows.length} rows)</span>
+                <span className="text-emerald-600 dark:text-emerald-400">{validCount} ready to import</span>
+              </div>
+              <div className="max-h-52 overflow-y-auto divide-y divide-zinc-100 dark:divide-zinc-800 text-xs">
+                {parsedRows.slice(0, 20).map((r, i) => {
+                  const marginPct =
+                    typeof r.costPrice === 'number' && r.price > 0
+                      ? Math.round(((r.price - r.costPrice) / r.price) * 100)
+                      : null;
+                  return (
+                    <div key={i} className="px-4 py-2 flex items-center justify-between gap-2">
+                      <div className="min-w-0">
+                        <span className="font-semibold">{r.productName}</span>
+                        <span className="text-zinc-500 ml-2">
+                          {r.sizeLabel} · {r.colorLabel} · {r.sku}
+                        </span>
+                      </div>
+                      <div className="font-mono tabular-nums shrink-0 text-right">
+                        <span>{r.price}</span>
+                        {typeof r.costPrice === 'number' && (
+                          <span className="text-zinc-500"> · Cost {r.costPrice} ({marginPct}%)</span>
+                        )}
+                        {typeof r.taxRate === 'number' && (
+                          <span className="text-zinc-500"> · {r.taxRate}% Tax</span>
+                        )}
+                        <span className="text-zinc-500"> · Qty {r.stock}</span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
         </div>
 
-        {/* Parsed Rows Preview Table */}
-        {parsedRows.length > 0 && (
-          <div className="flex-1 overflow-y-auto py-3 space-y-2 mt-2">
-            <div className="flex items-center justify-between text-xs font-extrabold text-[#1D1D1F]">
-              <span>Preview Parsed Rows ({parsedRows.length} items):</span>
-              <span className="text-[#1D1D1F]">
-                {parsedRows.filter(r => r.status === 'valid').length} Valid Rows Ready
-              </span>
-            </div>
-
-            <div className="border border-[#E5E5E7] rounded-2xl overflow-hidden shadow-2xs max-h-60 overflow-y-auto">
-              <table className="w-full text-left text-xs">
-                <thead className="bg-[#F5F5F7] text-[#1D1D1F] font-extrabold uppercase border-b border-[#E5E5E7] sticky top-0">
-                  <tr>
-                    <th className="py-2 px-3">School</th>
-                    <th className="py-2 px-3">Product Name</th>
-                    <th className="py-2 px-3">Size</th>
-                    <th className="py-2 px-3">Price</th>
-                    <th className="py-2 px-3">Stock</th>
-                    <th className="py-2 px-3">Status</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-[#E5E5E7]">
-                  {parsedRows.map((r, i) => (
-                    <tr key={i} className={r.status === 'invalid' ? 'bg-red-50 text-red-900' : 'hover:bg-[#F5F5F7]'}>
-                      <td className="py-2 px-3 font-bold">{r.schoolCode}</td>
-                      <td className="py-2 px-3">{r.productName}</td>
-                      <td className="py-2 px-3 font-mono">{r.sizeLabel}</td>
-                      <td className="py-2 px-3 font-extrabold">₹{r.price}</td>
-                      <td className="py-2 px-3">{r.stock}</td>
-                      <td className="py-2 px-3">
-                        {r.status === 'valid' ? (
-                          <span className="text-emerald-700 font-bold text-[10px]">Valid</span>
-                        ) : (
-                          <span className="text-red-700 font-bold text-[10px]">{r.error}</span>
-                        )}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        )}
-
-        {/* Footer */}
-        <div className="pt-4 border-t border-[#E5E5E7] flex items-center justify-between gap-3">
+        <div className="px-6 py-4 border-t border-zinc-200 dark:border-zinc-800 flex items-center justify-end gap-2">
           <button
+            type="button"
             onClick={onClose}
-            className="px-4 py-2 rounded-xl border border-[#E5E5E7] text-xs font-bold text-[#86868B] hover:bg-[#F5F5F7] cursor-pointer"
+            className="px-4 py-2 rounded-lg border border-zinc-200 dark:border-zinc-800 text-xs font-semibold cursor-pointer"
           >
             Cancel
           </button>
-
           <button
+            type="button"
             onClick={handleCommitImport}
-            disabled={isProcessing || parsedRows.filter(r => r.status === 'valid').length === 0}
-            className="px-5 py-2.5 rounded-xl bg-[#1D1D1F] text-white text-xs font-extrabold hover:bg-[#333336] transition-colors flex items-center gap-2 shadow-xs disabled:opacity-50 cursor-pointer"
+            disabled={isProcessing || validCount === 0}
+            className="px-5 py-2 rounded-lg bg-zinc-950 dark:bg-zinc-100 text-white dark:text-zinc-950 text-xs font-semibold flex items-center gap-1.5 disabled:opacity-40 cursor-pointer"
           >
-            <CheckCircle2 className="w-4 h-4" />
-            <span>{isProcessing ? 'Importing...' : 'Save & Import All Rates'}</span>
+            <CheckCircle2 className="w-3.5 h-3.5" />
+            <span>{isProcessing ? 'Importing...' : `Import ${validCount} Variants`}</span>
           </button>
         </div>
-
       </div>
     </div>
   );

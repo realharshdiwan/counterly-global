@@ -15,28 +15,28 @@ export const ROLE_INFO: Record<UserRole, RoleMeta> = {
     key: 'admin',
     label: 'Store Admin',
     shortLabel: 'Admin',
-    tagline: 'Store Operations & Cloud Backup',
-    description: 'Full store setup, team accounts, printer hardware, database sync & backup',
-    badgeClass: 'bg-[#F5F5F7] text-[#1D1D1F] border-[#E5E5E7]',
-    dotClass: 'bg-[#1D1D1F]',
+    tagline: 'Store Operations & Hardware',
+    description: 'Full store setup, team PINs, printer hardware, modules, license & backups',
+    badgeClass: 'bg-zinc-100 dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100 border-zinc-200 dark:border-zinc-700',
+    dotClass: 'bg-zinc-900 dark:bg-zinc-100',
   },
   manager: {
     key: 'manager',
     label: 'Shift Lead',
     shortLabel: 'Shift Lead',
     tagline: 'Catalog, Stock & Approvals',
-    description: 'School rate books, stock adjustments, register reviews & discount approvals',
-    badgeClass: 'bg-[#F5F5F7] text-[#1D1D1F] border-[#E5E5E7]',
-    dotClass: 'bg-[#515154]',
+    description: 'Product catalog, variant pricing, stock adjustments, day-close & discount approvals',
+    badgeClass: 'bg-zinc-100 dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100 border-zinc-200 dark:border-zinc-700',
+    dotClass: 'bg-zinc-600 dark:bg-zinc-400',
   },
   cashier: {
     key: 'cashier',
     label: 'Counter Associate',
     shortLabel: 'Associate',
     tagline: 'Counter Billing & Checkout',
-    description: 'Fast billing, student search, exchanges, thermal printing & counter checkout',
-    badgeClass: 'bg-[#F5F5F7] text-[#1D1D1F] border-[#E5E5E7]',
-    dotClass: 'bg-[#86868B]',
+    description: 'Fast barcode checkout, customer lookup, exchanges, receipts & drawer tally',
+    badgeClass: 'bg-zinc-100 dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100 border-zinc-200 dark:border-zinc-700',
+    dotClass: 'bg-zinc-400 dark:bg-zinc-500',
   },
 };
 
@@ -46,19 +46,20 @@ export interface UserProfile {
   role: UserRole;
   pin: string; // 6-digit PIN
   phone?: string;
-  avatar_url?: string; // Profile picture URL or base64 Data URL
+  avatar_url?: string;
   active: boolean;
-  max_discount_percent?: number; // max % discount cashier can give without manager PIN
-  max_discount_amount?: number; // max flat ₹ discount cashier can give without manager PIN
+  max_discount_percent?: number;
+  max_discount_amount?: number;
   created_at: string;
 }
 
-export type PaymentMethod = 'cash' | 'upi' | 'card' | 'credit' | 'split';
+export type PaymentMethod = 'cash' | 'card' | 'upi' | 'wallet' | 'credit' | 'split';
 
 export interface SplitPayment {
   cash: number;
-  upi: number;
   card: number;
+  upi: number;
+  wallet?: number;
   credit: number;
 }
 
@@ -71,7 +72,7 @@ export interface School {
   phone?: string;
   address?: string;
   notes?: string;
-  multiplier?: number; // base multiplier e.g. 1.0, 1.15
+  multiplier?: number;
 }
 
 export interface Category {
@@ -84,11 +85,31 @@ export interface Product {
   id: string;
   name: string;
   category: string;
-  size_group_id: string | null; // null if free-size like tie, belt, bag
+  brand?: string;
+  sku_prefix?: string;
+  has_variants?: boolean;
+  size_group_id: string | null;
   base_price: number;
-  stock: number; // aggregate stock or default
+  cost_price?: number;
+  tax_rate?: number;
+  stock: number;
   low_stock_threshold: number;
   hsn?: string;
+  active?: boolean;
+}
+
+export interface ProductVariant {
+  id: string;
+  product_id: string;
+  size_label: string;
+  color_label: string;
+  sku: string;
+  barcode: string;
+  price: number;
+  cost_price?: number;
+  tax_rate?: number;
+  stock_qty: number;
+  low_stock_threshold: number;
 }
 
 export interface SizeGroup {
@@ -112,7 +133,7 @@ export interface PriceEntry {
 }
 
 export interface ProductStock {
-  id: string; // `${product_id}_${size_id || 'free'}`
+  id: string;
   product_id: string;
   size_id: string | null;
   size_label: string;
@@ -124,24 +145,56 @@ export interface BillItem {
   id: string;
   product_id: string;
   product_name: string;
+  variant_id?: string;
   size_id: string | null;
   size_label: string | null;
+  color_label?: string | null;
+  sku?: string;
+  barcode?: string;
   school_id?: string;
   school_code?: string;
   school_name?: string;
   hsn?: string;
   qty: number;
   unit_price: number;
+  unit_cost?: number;
+  tax_rate?: number;
+  tax_amount?: number;
   discount_amount: number;
   subtotal: number;
+}
+
+export interface BillReturnItem {
+  bill_item_id: string;
+  product_id: string;
+  variant_id?: string;
+  product_name: string;
+  size_label?: string | null;
+  color_label?: string | null;
+  qty: number;
+  unit_price: number;
+  refund_amount: number;
+}
+
+export interface BillReturnRecord {
+  id: string;
+  return_number: string;
+  created_at: string;
+  items: BillReturnItem[];
+  refund_amount: number;
+  refund_method: 'cash' | 'card' | 'store_credit';
+  reason?: string;
+  processed_by?: string;
 }
 
 export interface Bill {
   id: string;
   bill_number: string;
   created_at: string;
+  currency_code?: string;
   customer_name: string;
   customer_phone: string;
+  customer_email?: string;
   customer_gstin?: string;
   customer_address?: string;
   po_number?: string;
@@ -152,13 +205,18 @@ export interface Bill {
   subtotal: number;
   discount_amount: number;
   discount_type: 'flat' | 'percent';
+  tax_amount?: number;
+  tax_label?: string;
   total: number;
   payment_method: PaymentMethod;
   payment_details: Partial<SplitPayment>;
+  store_credit_used?: number;
+  refunded_amount?: number;
+  return_records?: BillReturnRecord[];
   notes?: string;
   is_paid: boolean;
   paid_at?: string | null;
-  status: 'completed' | 'voided';
+  status: 'completed' | 'voided' | 'exchanged';
   voided_at?: string | null;
   void_reason?: string;
   billed_by_id?: string;
@@ -166,13 +224,49 @@ export interface Bill {
   items: BillItem[];
 }
 
+export interface CashDrawerEntry {
+  id: string;
+  type: 'float_in' | 'safe_drop' | 'paid_out';
+  amount: number;
+  reason: string;
+  staff_id?: string;
+  staff_name?: string;
+  created_at: string;
+}
+
+export interface ShiftCloseRecord {
+  id: string;
+  date: string;
+  closed_at: string;
+  closed_by: string;
+  bills_count: number;
+  gross_sales: number;
+  refunds_total: number;
+  store_credit_used: number;
+  net_sales: number;
+  cash_sales: number;
+  card_sales: number;
+  digital_sales: number;
+  credit_sales: number;
+  float_in_total: number;
+  safe_drop_total: number;
+  paid_out_total: number;
+  cash_refunds: number;
+  opening_float: number;
+  expected_cash: number;
+  counted_cash: number;
+  variance: number;
+  notes?: string;
+}
+
 export interface InventoryMovement {
   id: string;
   product_id: string;
+  variant_id?: string;
   product_name: string;
   size_label: string;
   type: 'purchase' | 'adjustment' | 'return' | 'sale';
-  qty: number; // positive for addition, negative for reduction
+  qty: number;
   previous_stock: number;
   new_stock: number;
   notes?: string;
@@ -181,8 +275,14 @@ export interface InventoryMovement {
 }
 
 export type GstSchemeType = 'composition' | 'regular' | 'none';
+export type TaxLabel = 'Sales Tax' | 'VAT' | 'GST' | 'Tax';
 
 export type StoreBusinessType = 'apparel' | 'boutique' | 'footwear' | 'uniform' | 'general';
+
+export interface StoreModules {
+  alterations: boolean;
+  institutional_accounts: boolean;
+}
 
 export interface ShopConfig {
   id: string;
@@ -191,10 +291,14 @@ export interface ShopConfig {
   shop_address: string;
   shop_phone: string;
   store_type?: StoreBusinessType;
+  currency_code?: string;
+  currency_symbol?: string;
+  locale?: string;
+  tax_label?: TaxLabel;
   gstin: string;
   gst_scheme?: GstSchemeType;
   upi_id: string;
-  printer_width: 32 | 48; // 32 = 58mm, 48 = 80mm
+  printer_width: 32 | 48;
   auto_print_cash: boolean;
   auto_print_upi: boolean;
   sound_feedback: boolean;
@@ -202,6 +306,8 @@ export interface ShopConfig {
   bill_sequence: number;
   tax_type: 'none' | 'inclusive' | 'exclusive';
   tax_rate: number;
+  enabled_modules?: StoreModules;
+  checkout_payment_url?: string;
   bank_name?: string;
   bank_account_no?: string;
   bank_ifsc?: string;
@@ -212,16 +318,55 @@ export interface ShopConfig {
 }
 
 export interface CartItem {
+  variant_id?: string;
   product_id: string;
   product_name: string;
   size_id: string | null;
   size_label: string | null;
+  color_label?: string | null;
+  sku?: string;
+  barcode?: string;
   school_id: string;
   school_code: string;
   school_name: string;
   unit_price: number;
+  unit_cost?: number;
+  tax_rate?: number;
   qty: number;
   available_stock: number;
+}
+
+export interface CustomerCreditEntry {
+  id: string;
+  amount: number;
+  type: 'issue' | 'redeem' | 'refund';
+  note: string;
+  created_at: string;
+  bill_number?: string;
+}
+
+export interface CustomerProfile {
+  id: string;
+  name: string;
+  phone: string;
+  email?: string;
+  fit_notes?: string;
+  store_credit_balance?: number;
+  credit_transactions?: CustomerCreditEntry[];
+  last_visit_at: string;
+}
+
+export interface VendorLicenseRecord {
+  key: string;
+  buyerName: string;
+  buyerEmail?: string;
+  tier: LicenseTier;
+  expiresAt: string;
+  machineId: string;
+  createdAt: string;
+  revoked: boolean;
+  revokedAt?: string;
+  notes?: string;
 }
 
 export interface StudentProfile {
@@ -231,8 +376,8 @@ export interface StudentProfile {
   student_name: string;
   school_id: string;
   school_name: string;
-  grade?: string; // e.g. "Grade 6-B"
-  house_color?: string; // e.g. "Red House", "Blue House", "Green House", "Yellow House"
+  grade?: string;
+  house_color?: string;
   gender?: 'boy' | 'girl' | 'unisex';
   past_sizes: {
     [product_name: string]: {
@@ -253,12 +398,12 @@ export interface AdvanceOrderItem {
   size_label: string;
   qty: number;
   estimated_price: number;
-  alteration_notes?: string; // e.g. "Hem pant length by 1.5 inches", "Embroider name 'Aarav'"
+  alteration_notes?: string;
 }
 
 export interface AdvanceOrderJob {
   id: string;
-  token_number: string; // e.g. "ALT-1042"
+  token_number: string;
   order_type: 'alteration' | 'advance_booking' | 'custom_tailoring';
   customer_name: string;
   customer_phone: string;
@@ -295,14 +440,14 @@ export interface ParkedBill {
 
 export type LicenseTier = 'starter' | 'pro' | 'enterprise' | 'lifetime';
 
-export type LicenseStatus = 
-  | 'trial_active' 
-  | 'trial_expiring' 
-  | 'trial_expired' 
-  | 'licensed_active' 
-  | 'license_expiring' 
-  | 'license_expired' 
-  | 'clock_tampered' 
+export type LicenseStatus =
+  | 'trial_active'
+  | 'trial_expiring'
+  | 'trial_expired'
+  | 'licensed_active'
+  | 'license_expiring'
+  | 'license_expired'
+  | 'clock_tampered'
   | 'machine_mismatch';
 
 export interface LicenseFeatures {
@@ -318,10 +463,10 @@ export interface LicenseFeatures {
 export interface LicenseRecord {
   license_key: string;
   store_name: string;
-  machine_id: string; // Hardware signature or 'UNIV' for wildcard
+  machine_id: string;
   tier: LicenseTier;
   issued_at: string;
-  expires_at: string; // 'PERPETUAL' or ISO string
+  expires_at: string;
   max_counters: number;
   features: LicenseFeatures;
   signature: string;
@@ -343,4 +488,3 @@ export interface LicenseState {
   activatedAt?: string;
   firstInstalledAt?: string;
 }
-

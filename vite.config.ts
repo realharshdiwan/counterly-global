@@ -14,9 +14,9 @@ export default defineConfig(() => {
         includeAssets: ['favicon.ico', 'apple-touch-icon.png', 'icon.svg'],
         manifest: {
           id: '/',
-          name: 'Counterly POS — Retail Store Management',
-          short_name: 'Counterly',
-          description: 'High-speed offline-first point of sale, uniform price books, and retail billing.',
+          name: 'SikkaDesk POS — Retail Store Billing',
+          short_name: 'SikkaDesk',
+          description: 'Fast offline-first retail billing, UPI QR checkout, barcode printing, and stock ledger for Indian shops.',
           theme_color: '#0E7440',
           background_color: '#F4F8F5',
           display: 'standalone',

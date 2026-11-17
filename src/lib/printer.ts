@@ -1,184 +1,159 @@
 import { type Bill, type ShopConfig } from '../types';
+import { formatDateShort, formatPrintMoney, formatTimeShort, getCurrencyCode, getPaymentMethodLabel } from './locale';
 
-// Convert number to Indian Rupee Words
-export function numberToWords(num: number): string {
+export function numberToWords(num: number, config?: ShopConfig | null): string {
   const a = [
     '', 'One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight', 'Nine', 'Ten',
     'Eleven', 'Twelve', 'Thirteen', 'Fourteen', 'Fifteen', 'Sixteen', 'Seventeen', 'Eighteen', 'Nineteen'
   ];
   const b = ['', '', 'Twenty', 'Thirty', 'Forty', 'Fifty', 'Sixty', 'Seventy', 'Eighty', 'Ninety'];
 
-  const n = Math.floor(num);
-  if (n === 0) return 'Rupees Zero Only';
+  const code = getCurrencyCode(config);
+  const unitLabel = code === 'INR' ? 'Rupees' : code === 'EUR' ? 'Euros' : code === 'GBP' ? 'Pounds' : 'Dollars';
+  const n = Math.floor(Math.abs(num));
+  if (n === 0) return `${unitLabel} Zero Only`;
 
-  function convert(n: number): string {
-    if (n < 20) return a[n];
-    if (n < 100) return b[Math.floor(n / 10)] + (n % 10 !== 0 ? ' ' + a[n % 10] : '');
-    if (n < 1000) return a[Math.floor(n / 100)] + ' Hundred' + (n % 100 !== 0 ? ' ' + convert(n % 100) : '');
-    if (n < 100000) return convert(Math.floor(n / 1000)) + ' Thousand' + (n % 1000 !== 0 ? ' ' + convert(n % 1000) : '');
-    if (n < 10000000) return convert(Math.floor(n / 100000)) + ' Lakh' + (n % 100000 !== 0 ? ' ' + convert(n % 100000) : '');
-    return convert(Math.floor(n / 10000000)) + ' Crore' + (n % 10000000 !== 0 ? ' ' + convert(n % 10000000) : '');
+  function convert(val: number): string {
+    if (val < 20) return a[val];
+    if (val < 100) return b[Math.floor(val / 10)] + (val % 10 !== 0 ? ' ' + a[val % 10] : '');
+    if (val < 1000) return a[Math.floor(val / 100)] + ' Hundred' + (val % 100 !== 0 ? ' ' + convert(val % 100) : '');
+    if (val < 1000000) return convert(Math.floor(val / 1000)) + ' Thousand' + (val % 1000 !== 0 ? ' ' + convert(val % 1000) : '');
+    return convert(Math.floor(val / 1000000)) + ' Million' + (val % 1000000 !== 0 ? ' ' + convert(val % 1000000) : '');
   }
 
-  return 'Rupees ' + convert(n).trim() + ' Only';
+  return `${unitLabel} ${convert(n).trim()} Only`;
 }
 
-// ESC/POS Commands
 const ESC = '\x1B';
 const GS = '\x1D';
 
 export function generateEscPosReceipt(bill: Bill, config: ShopConfig, overrideWidth?: 32 | 48): Uint8Array {
-  const width = overrideWidth || config.printer_width || 48; // 32 chars for 58mm, 48 chars for 80mm
+  const width = overrideWidth || config.printer_width || 48;
   const is32 = width <= 32;
+  const divider = '-'.repeat(width);
 
   let out = '';
 
-  // Initialize
-  out += ESC + '@'; // Reset
-  out += ESC + 'a' + '\x01'; // Center alignment
+  out += ESC + '@';
+  out += ESC + 'a' + '\x01';
 
-  // Header
-  out += ESC + 'E' + '\x01'; // Bold on
-  out += (config.legal_name || 'SARASWATI GARMENTS') + '\n';
-  out += ESC + 'E' + '\x00'; // Bold off
+  out += ESC + 'E' + '\x01';
+  out += (config.legal_name || 'SIKKADESK RETAIL') + '\n';
+  out += ESC + 'E' + '\x00';
 
-  if (config.shop_tagline) {
-    out += config.shop_tagline + '\n';
-  }
-  if (config.shop_address) {
-    out += config.shop_address + '\n';
-  }
-  if (config.shop_phone) {
-    out += 'Ph: ' + config.shop_phone + '\n';
-  }
-  if (config.gstin) {
-    out += 'GSTIN: ' + config.gstin + '\n';
-  }
+  if (config.shop_tagline) out += config.shop_tagline + '\n';
+  if (config.shop_address) out += config.shop_address + '\n';
+  if (config.shop_phone) out += 'Tel: ' + config.shop_phone + '\n';
+  if (config.gstin) out += `${config.tax_label || 'Tax'} ID: ` + config.gstin + '\n';
 
-  out += ESC + 'a' + '\x01'; // Center
-  out += '------------------------------------------------'.substring(0, width) + '\n';
-  out += ESC + 'E' + '\x01'; // Bold
-  const scheme = config.gst_scheme || 'composition';
-  if (scheme === 'regular') {
-    out += 'TAX INVOICE\n';
-    out += ESC + 'E' + '\x00'; // Normal
-  } else if (scheme === 'none') {
-    out += 'CASH MEMO\n';
-    out += ESC + 'E' + '\x00'; // Normal
+  out += ESC + 'a' + '\x01';
+  out += divider + '\n';
+  out += ESC + 'E' + '\x01';
+  if (config.tax_type !== 'none' && config.tax_rate > 0) {
+    out += `${(config.tax_label || 'TAX').toUpperCase()} RECEIPT\n`;
   } else {
-    out += 'BILL OF SUPPLY\n';
-    out += ESC + 'E' + '\x00'; // Normal
-    out += is32
-      ? 'Composition taxable person,\nnot eligible to collect tax\n'
-      : 'Composition taxable person, not eligible to collect tax\n';
+    out += 'SALES RECEIPT\n';
   }
-  out += '------------------------------------------------'.substring(0, width) + '\n';
+  out += ESC + 'E' + '\x00';
+  out += divider + '\n';
 
-  // Left align for bill metadata
-  out += ESC + 'a' + '\x00'; // Left align
-  const billDate = new Date(bill.created_at);
-  const dateStr = billDate.toLocaleDateString('en-IN') + ' ' + billDate.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' });
+  out += ESC + 'a' + '\x00';
+  const dateStr = `${formatDateShort(bill.created_at, config)} ${formatTimeShort(bill.created_at, config)}`;
 
-  out += `Bill No: ${bill.bill_number}\n`;
+  out += `Receipt: ${bill.bill_number}\n`;
   out += `Date   : ${dateStr}\n`;
-  out += `${bill.schools && bill.schools.length > 1 ? 'Schools: ' : 'School : '}${bill.school_name}\n`;
+  if (bill.school_name && bill.school_id !== 'retail_counter' && bill.school_name !== 'Walk-in Retail') {
+    out += `Account: ${bill.school_name}\n`;
+  }
   if (bill.customer_name || bill.customer_phone) {
     out += `Cust   : ${[bill.customer_name, bill.customer_phone].filter(Boolean).join(' · ')}\n`;
   }
 
-  out += '------------------------------------------------'.substring(0, width) + '\n';
+  out += divider + '\n';
 
-  // Items Header
   if (is32) {
-    // 32-column layout (58mm)
-    out += 'Item              Qty  Rate  Amt\n';
-    out += '--------------------------------\n';
+    out += 'Item              Qty Rate   Amt\n';
+    out += divider + '\n';
     for (const item of bill.items) {
-      const schPrefix = item.school_code ? `[${item.school_code}] ` : '';
-      const name = schPrefix + item.product_name + (item.size_label ? ` (${item.size_label})` : '');
-      const trimmedName = name.length > 32 ? name.substring(0, 31) + '.' : name;
-      out += trimmedName + '\n';
+      const variantTag = [item.size_label, item.color_label].filter(Boolean).join('/');
+      const name = item.product_name + (variantTag ? ` (${variantTag})` : '');
+      out += (name.length > 32 ? name.substring(0, 31) + '.' : name) + '\n';
       const qtyStr = String(item.qty).padStart(3);
-      const rateStr = `Rs.${item.unit_price}`.padStart(7);
-      const amtStr = `Rs.${item.subtotal}`.padStart(8);
-      out += `           ${qtyStr} ${rateStr} ${amtStr}\n`;
+      const rateStr = formatPrintMoney(item.unit_price, config).padStart(7);
+      const amtStr = formatPrintMoney(item.subtotal, config).padStart(8);
+      out += `          ${qtyStr} ${rateStr} ${amtStr}\n`;
     }
-    out += '--------------------------------\n';
+    out += divider + '\n';
   } else {
-    // 48-column layout (80mm)
-    out += 'Item Description          Size  Qty   Rate   Amt\n';
-    out += '------------------------------------------------\n';
+    out += 'Item Description         Var    Qty   Rate   Amt\n';
+    out += divider + '\n';
     for (const item of bill.items) {
-      const schPrefix = item.school_code ? `[${item.school_code}] ` : '';
-      const fullName = schPrefix + item.product_name;
-      const name = fullName.padEnd(25).substring(0, 25);
-      const size = (item.size_label || '-').padEnd(5).substring(0, 5);
-      const qty = String(item.qty).padStart(4);
-      const rate = `Rs.${item.unit_price}`.padStart(7);
-      const amt = `Rs.${item.subtotal}`.padStart(7);
+      const variantTag = [item.size_label, item.color_label].filter(Boolean).join('/');
+      const name = item.product_name.padEnd(24).substring(0, 24);
+      const size = (variantTag || '-').padEnd(6).substring(0, 6);
+      const qty = String(item.qty).padStart(3);
+      const rate = formatPrintMoney(item.unit_price, config).padStart(7);
+      const amt = formatPrintMoney(item.subtotal, config).padStart(7);
       out += `${name} ${size} ${qty} ${rate} ${amt}\n`;
     }
-    out += '------------------------------------------------\n';
+    out += divider + '\n';
   }
 
-  // Subtotal & Totals
-  const padLabel = is32 ? 20 : 36;
-  const padVal = is32 ? 12 : 12;
+  const padLabel = is32 ? 20 : 35;
+  const padVal = is32 ? 12 : 13;
 
-  out += 'Subtotal:'.padEnd(padLabel) + `Rs.${bill.subtotal}`.padStart(padVal) + '\n';
+  out += 'Subtotal:'.padEnd(padLabel) + formatPrintMoney(bill.subtotal, config).padStart(padVal) + '\n';
 
   if (bill.discount_amount > 0) {
-    out += 'Discount:'.padEnd(padLabel) + `-Rs.${bill.discount_amount}`.padStart(padVal) + '\n';
+    out += 'Discount:'.padEnd(padLabel) + ('-' + formatPrintMoney(bill.discount_amount, config)).padStart(padVal) + '\n';
   }
 
-  out += '------------------------------------------------'.substring(0, width) + '\n';
+  if (bill.tax_amount && bill.tax_amount > 0) {
+    const tLabel = `${bill.tax_label || config.tax_label || 'Tax'}:`;
+    out += tLabel.padEnd(padLabel) + formatPrintMoney(bill.tax_amount, config).padStart(padVal) + '\n';
+  }
 
-  // Total in bold
-  out += ESC + 'E' + '\x01'; // Bold on
-  out += 'TOTAL PAYABLE:'.padEnd(padLabel) + `Rs.${bill.total}`.padStart(padVal) + '\n';
-  out += ESC + 'E' + '\x00'; // Bold off
+  out += divider + '\n';
+  out += ESC + 'E' + '\x01';
+  out += 'TOTAL:'.padEnd(padLabel) + formatPrintMoney(bill.total, config).padStart(padVal) + '\n';
+  out += ESC + 'E' + '\x00';
+  if ((bill.store_credit_used || 0) > 0) {
+    out += 'Store Credit:'.padEnd(padLabel) + ('-' + formatPrintMoney(bill.store_credit_used || 0, config)).padStart(padVal) + '\n';
+  }
+  if ((bill.refunded_amount || 0) > 0) {
+    out += 'Refunded:'.padEnd(padLabel) + ('-' + formatPrintMoney(bill.refunded_amount || 0, config)).padStart(padVal) + '\n';
+    out += ESC + 'E' + '\x01';
+    out += 'NET PAID:'.padEnd(padLabel) + formatPrintMoney(Math.max(0, bill.total - (bill.refunded_amount || 0)), config).padStart(padVal) + '\n';
+    out += ESC + 'E' + '\x00';
+  }
+  out += divider + '\n';
 
-  out += '------------------------------------------------'.substring(0, width) + '\n';
-
-  // Payment status
-  const payMethodText = bill.payment_method.toUpperCase();
-  out += `Payment Mode: ${payMethodText} (${bill.is_paid ? 'PAID' : 'PENDING'})\n`;
+  const payMethodText = getPaymentMethodLabel(bill.payment_method, config).toUpperCase();
+  out += `Payment: ${payMethodText} (${bill.is_paid ? 'PAID' : 'DUE'})\n`;
   if (bill.payment_method === 'split' && bill.payment_details) {
     const d = bill.payment_details;
-    const parts = [];
-    if (d.cash) parts.push(`Cash: Rs.${d.cash}`);
-    if (d.upi) parts.push(`UPI: Rs.${d.upi}`);
-    if (d.card) parts.push(`Card: Rs.${d.card}`);
-    if (d.credit) parts.push(`Credit: Rs.${d.credit}`);
-    out += `  ${parts.join(' | ')}\n`;
+    const parts: string[] = [];
+    if (d.cash) parts.push(`Cash: ${formatPrintMoney(d.cash, config)}`);
+    if (d.card) parts.push(`Card: ${formatPrintMoney(d.card, config)}`);
+    if (d.upi) parts.push(`Digital: ${formatPrintMoney(d.upi, config)}`);
+    if (d.credit) parts.push(`Credit: ${formatPrintMoney(d.credit, config)}`);
+    if (parts.length > 0) out += `  ${parts.join(' | ')}\n`;
   }
 
-  // Amount in words
-  out += `\n${numberToWords(bill.total)}\n\n`;
+  out += '\n';
+  out += ESC + 'a' + '\x01';
+  out += divider + '\n';
+  out += (config.terms_conditions || '7-day exchange with original receipt & tags intact.') + '\n';
+  out += divider + '\n';
+  out += 'THANK YOU FOR YOUR BUSINESS\n\n\n\n';
+  out += GS + 'V' + '\x42' + '\x00';
 
-  // Footer & Exchange Policy
-  out += ESC + 'a' + '\x01'; // Center
-  out += '------------------------------------------------'.substring(0, width) + '\n';
-  out += '*** 7-DAY UNIFORM EXCHANGE POLICY ***\n';
-  out += '• Original bill & barcode tags must be intact\n';
-  out += '• Size exchange within 7 days of purchase\n';
-  out += '• No exchange on altered, stitched or washed items\n';
-  out += '------------------------------------------------'.substring(0, width) + '\n';
-  out += '*** THANK YOU FOR SHOPPING WITH US! ***\n\n';
-
-  // Paper feed & cut
-  out += '\n\n\n';
-  out += GS + 'V' + '\x42' + '\x00'; // Full cut
-
-  // Encode to bytes
   return new TextEncoder().encode(out);
 }
 
-// Web Bluetooth LE Thermal Printer Service
 class BluetoothPrinterService {
   private device: BluetoothDevice | null = null;
   private characteristic: BluetoothRemoteGATTCharacteristic | null = null;
-  private isConnecting = false;
 
   async isSupported(): Promise<boolean> {
     return typeof navigator !== 'undefined' && 'bluetooth' in navigator;
@@ -194,123 +169,107 @@ class BluetoothPrinterService {
 
   async connect(): Promise<boolean> {
     if (!('bluetooth' in navigator)) {
-      throw new Error('Web Bluetooth is not supported on this browser or platform.');
+      throw new Error('Web Bluetooth is not supported on this browser.');
     }
 
-    try {
-      this.isConnecting = true;
-      // Request device with standard POS / Serial BLE service UUIDs
-      const device = await navigator.bluetooth.requestDevice({
-        filters: [
-          { services: ['000018f0-0000-1000-8000-00805f9b34fb'] },
-          { services: ['0000fee7-0000-1000-8000-00805f9b34fb'] },
-          { services: ['0000e0ff-3c17-d293-8e48-14fe2e4da212'] },
-          { services: ['49535343-fe7d-4ae5-8fa9-9fafd205e455'] },
-          { namePrefix: 'MPT' },
-          { namePrefix: 'RP' },
-          { namePrefix: 'POS' },
-          { namePrefix: 'BT' },
-          { namePrefix: 'Thermal' },
-        ],
-        optionalServices: [
-          '000018f0-0000-1000-8000-00805f9b34fb',
-          '0000fee7-0000-1000-8000-00805f9b34fb',
-          '0000e0ff-3c17-d293-8e48-14fe2e4da212',
-          '49535343-fe7d-4ae5-8fa9-9fafd205e455',
-        ],
-      });
+    const device = await navigator.bluetooth.requestDevice({
+      filters: [
+        { services: ['000018f0-0000-1000-8000-00805f9b34fb'] },
+        { services: ['0000fee7-0000-1000-8000-00805f9b34fb'] },
+        { services: ['0000e0ff-3c17-d293-8e48-14fe2e4da212'] },
+        { services: ['49535343-fe7d-4ae5-8fa9-9fafd205e455'] },
+        { namePrefix: 'MPT' },
+        { namePrefix: 'RP' },
+        { namePrefix: 'POS' },
+        { namePrefix: 'BT' },
+        { namePrefix: 'Thermal' },
+      ],
+      optionalServices: [
+        '000018f0-0000-1000-8000-00805f9b34fb',
+        '0000fee7-0000-1000-8000-00805f9b34fb',
+        '0000e0ff-3c17-d293-8e48-14fe2e4da212',
+        '49535343-fe7d-4ae5-8fa9-9fafd205e455',
+      ],
+    });
 
-      this.device = device;
-      const server = await device.gatt?.connect();
-      if (!server) throw new Error('Could not connect to GATT Server');
+    this.device = device;
+    const server = await device.gatt?.connect();
+    if (!server) throw new Error('Could not connect to printer GATT server');
 
-      // Discover writable characteristic
-      const services = await server.getPrimaryServices();
-      for (const service of services) {
-        const characteristics = await service.getCharacteristics();
-        for (const char of characteristics) {
-          if (char.properties.write || char.properties.writeWithoutResponse) {
-            this.characteristic = char;
-            break;
-          }
+    const services = await server.getPrimaryServices();
+    for (const service of services) {
+      const characteristics = await service.getCharacteristics();
+      for (const char of characteristics) {
+        if (char.properties.write || char.properties.writeWithoutResponse) {
+          this.characteristic = char;
+          break;
         }
-        if (this.characteristic) break;
       }
-
-      if (!this.characteristic) {
-        throw new Error('No writable thermal printer characteristic found.');
-      }
-
-      return true;
-    } finally {
-      this.isConnecting = false;
+      if (this.characteristic) break;
     }
+
+    if (!this.characteristic) {
+      throw new Error('No writable thermal printer characteristic found.');
+    }
+    return true;
   }
 
   async disconnect(): Promise<void> {
-    if (this.device?.gatt?.connected) {
-      this.device.gatt.disconnect();
+    try {
+      if (this.device?.gatt?.connected) {
+        this.device.gatt.disconnect();
+      }
+    } finally {
+      this.characteristic = null;
     }
-    this.device = null;
-    this.characteristic = null;
   }
 
   async printData(data: Uint8Array): Promise<void> {
+    if (!this.characteristic || !this.device?.gatt?.connected) {
+      await this.connect();
+    }
     if (!this.characteristic) {
-      throw new Error('Printer not connected over Bluetooth.');
+      throw new Error('Thermal printer not connected');
     }
 
-    // Send in 200-byte chunks to avoid buffer overflow
-    const chunkSize = 200;
+    const chunkSize = 100;
     for (let i = 0; i < data.length; i += chunkSize) {
       const chunk = data.slice(i, i + chunkSize);
-      if (this.characteristic.properties.writeWithoutResponse) {
-        await this.characteristic.writeValueWithoutResponse(chunk);
-      } else {
-        await this.characteristic.writeValueWithResponse(chunk);
-      }
-      // Brief pause between packets
-      await new Promise(r => setTimeout(r, 20));
+      await this.characteristic.writeValue(chunk);
+      await new Promise(resolve => setTimeout(resolve, 25));
     }
   }
 }
 
 export const bluetoothPrinter = new BluetoothPrinterService();
 
-// Quick audio sound feedback using Web Audio API (no external asset downloads)
-export function playBeep(type: 'tap' | 'success' | 'warn' = 'tap') {
+export function playBeep(type: 'success' | 'warn' | 'tap' = 'success') {
   try {
-    const AudioContextClass = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
-    if (!AudioContextClass) return;
-
-    const ctx = new AudioContextClass();
+    const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+    if (!AudioCtx) return;
+    const ctx = new AudioCtx();
     const osc = ctx.createOscillator();
     const gain = ctx.createGain();
-
     osc.connect(gain);
     gain.connect(ctx.destination);
 
-    if (type === 'tap') {
-      osc.frequency.setValueAtTime(880, ctx.currentTime); // A5 high pleasant tap
+    if (type === 'success') {
+      osc.frequency.setValueAtTime(1046.5, ctx.currentTime);
       gain.gain.setValueAtTime(0.08, ctx.currentTime);
-      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.05);
-      osc.start(ctx.currentTime);
-      osc.stop(ctx.currentTime + 0.05);
-    } else if (type === 'success') {
-      osc.frequency.setValueAtTime(587.33, ctx.currentTime); // D5
-      osc.frequency.setValueAtTime(880, ctx.currentTime + 0.08); // A5
-      gain.gain.setValueAtTime(0.12, ctx.currentTime);
-      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.22);
-      osc.start(ctx.currentTime);
-      osc.stop(ctx.currentTime + 0.22);
+      osc.start();
+      osc.stop(ctx.currentTime + 0.08);
     } else if (type === 'warn') {
       osc.frequency.setValueAtTime(320, ctx.currentTime);
-      gain.gain.setValueAtTime(0.12, ctx.currentTime);
-      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.15);
-      osc.start(ctx.currentTime);
-      osc.stop(ctx.currentTime + 0.15);
+      gain.gain.setValueAtTime(0.1, ctx.currentTime);
+      osc.start();
+      osc.stop(ctx.currentTime + 0.14);
+    } else {
+      osc.frequency.setValueAtTime(800, ctx.currentTime);
+      gain.gain.setValueAtTime(0.04, ctx.currentTime);
+      osc.start();
+      osc.stop(ctx.currentTime + 0.03);
     }
   } catch {
-    // Audio context may be restricted before user gesture
+    // ignore audio block
   }
 }

@@ -20,7 +20,7 @@ export const PWAInstallButton: React.FC<{ className?: string; compact?: boolean 
       <button
         type="button"
         onClick={install}
-        title="Install Counterly as an Offline Desktop App on your PC"
+        title="Install SikkaDesk as an Offline Desktop App on your PC"
         className={`flex items-center gap-1.5 rounded-xl bg-[#1D1D1F] hover:bg-[#333336] text-white font-semibold text-xs transition-all shadow-xs active:scale-95 px-3 py-1.5 cursor-pointer ${className}`}
       >
         <Monitor className="w-3.5 h-3.5 text-slate-300" />
@@ -50,7 +50,7 @@ export const PWAInstallButton: React.FC<{ className?: string; compact?: boolean 
                   <div className="w-8 h-8 rounded-xl bg-[#F5F5F7] text-[#1D1D1F] flex items-center justify-center">
                     <Monitor className="w-4 h-4" />
                   </div>
-                  <h3 className="text-sm font-bold text-[#1D1D1F]">Install Counterly App</h3>
+                  <h3 className="text-sm font-bold text-[#1D1D1F]">Install SikkaDesk App</h3>
                 </div>
                 <button
                   type="button"
@@ -72,7 +72,7 @@ export const PWAInstallButton: React.FC<{ className?: string; compact?: boolean 
                 </div>
                 <div className="flex items-start gap-2.5 p-2.5 rounded-xl bg-[#F5F5F7]">
                   <span className="font-bold text-[#1D1D1F] bg-white w-5 h-5 rounded-full flex items-center justify-center shadow-xs shrink-0">3</span>
-                  <span>Counterly will launch in full-screen standalone mode with 100% offline access.</span>
+                  <span>SikkaDesk will launch in full-screen standalone mode with 100% offline access.</span>
                 </div>
               </div>
 

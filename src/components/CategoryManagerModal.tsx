@@ -1,20 +1,17 @@
 import React, { useState, useEffect } from 'react';
-import { 
-  FolderTree, 
-  Plus, 
-  Edit2, 
-  Trash2, 
-  X, 
-  Check, 
-  AlertCircle, 
-  Package, 
-  Sparkles,
-  ArrowRight,
+import {
+  FolderTree,
+  Plus,
+  Edit2,
+  Trash2,
+  X,
+  Check,
+  AlertCircle,
   ShieldCheck,
-  RotateCcw
+  RotateCcw,
 } from 'lucide-react';
 import { db, DEFAULT_CATEGORIES } from '../db/db';
-import { type Category, type Product } from '../types';
+import { type Category } from '../types';
 import { useAuth } from '../context/AuthContext';
 import { playBeep } from '../lib/printer';
 
@@ -37,11 +34,8 @@ export const CategoryManagerModal: React.FC<CategoryManagerModalProps> = ({
   const [newCatName, setNewCatName] = useState('');
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingName, setEditingName] = useState('');
-  
-  // Deletion modal state for reassigning products
   const [categoryToDelete, setCategoryToDelete] = useState<Category | null>(null);
-  const [reassignTargetId, setReassignTargetId] = useState<string>('uniform');
-
+  const [reassignTargetId, setReassignTargetId] = useState<string>('tops');
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
@@ -60,7 +54,6 @@ export const CategoryManagerModal: React.FC<CategoryManagerModalProps> = ({
       cats.sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
       setCategories(cats);
 
-      // Tally products per category
       const products = await db.products.toArray();
       const counts: Record<string, number> = {};
       products.forEach(p => {
@@ -85,7 +78,6 @@ export const CategoryManagerModal: React.FC<CategoryManagerModalProps> = ({
 
   if (!isOpen) return null;
 
-  // Handle Add Category
   const handleAddCategory = async (e: React.FormEvent) => {
     e.preventDefault();
     const clean = newCatName.trim();
@@ -93,307 +85,239 @@ export const CategoryManagerModal: React.FC<CategoryManagerModalProps> = ({
 
     const slug = clean.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
     if (!slug) {
-      setErrorMsg('Please enter a valid category name');
+      setErrorMsg('Please enter a valid category name.');
       return;
     }
 
-    // Check duplicate
     if (categories.some(c => c.id === slug || c.name.toLowerCase() === clean.toLowerCase())) {
-      setErrorMsg(`A category named "${clean}" already exists`);
+      setErrorMsg(`Category "${clean}" already exists.`);
       playBeep('warn');
       return;
     }
 
     try {
-      const newCat: Category = {
+      await db.categories.add({
         id: slug,
         name: clean,
         sort_order: categories.length + 1,
-      };
-      await db.categories.add(newCat);
+      });
       playBeep('success');
-      showToast(`Category "${clean}" created`);
+      showToast(`Category "${clean}" added`);
       setNewCatName('');
       setErrorMsg(null);
       await loadData();
-      if (onCategoriesChanged) onCategoriesChanged();
-    } catch (err) {
-      console.error('Failed to add category:', err);
-      setErrorMsg('Failed to create category');
+      onCategoriesChanged?.();
+    } catch {
+      setErrorMsg('Failed to create category.');
     }
   };
 
-  // Start Editing
-  const startEditing = (cat: Category) => {
-    setEditingId(cat.id);
-    setEditingName(cat.name);
-    setErrorMsg(null);
-  };
-
-  // Save Edit
   const saveEditing = async (catId: string) => {
     const clean = editingName.trim();
     if (!clean) {
       setEditingId(null);
       return;
     }
-
     try {
       await db.categories.update(catId, { name: clean });
       playBeep('success');
       showToast('Category renamed');
       setEditingId(null);
       await loadData();
-      if (onCategoriesChanged) onCategoriesChanged();
-    } catch (err) {
-      console.error('Failed to update category:', err);
-      setErrorMsg('Failed to rename category');
+      onCategoriesChanged?.();
+    } catch {
+      setErrorMsg('Failed to rename category.');
     }
   };
 
-  // Initiate Delete
-  const handleInitiateDelete = (cat: Category) => {
-    const count = productCounts[cat.id] || 0;
-    if (count > 0) {
-      // Must prompt to reassign products
-      const otherCats = categories.filter(c => c.id !== cat.id);
-      setReassignTargetId(otherCats[0]?.id || 'uniform');
-      setCategoryToDelete(cat);
-    } else {
-      // Safe to delete directly
-      executeDelete(cat.id);
-    }
-  };
-
-  // Execute Delete
   const executeDelete = async (catId: string, reassignTo?: string) => {
     try {
       if (reassignTo) {
-        // Update all products in this category
         const productsToReassign = await db.products.where('category').equals(catId).toArray();
         for (const prod of productsToReassign) {
           await db.products.update(prod.id, { category: reassignTo });
         }
       }
-
       await db.categories.delete(catId);
       playBeep('success');
-      showToast('Category deleted');
+      showToast('Category removed');
       setCategoryToDelete(null);
       await loadData();
-      if (onCategoriesChanged) onCategoriesChanged();
-    } catch (err) {
-      console.error('Failed to delete category:', err);
-      setErrorMsg('Failed to delete category');
+      onCategoriesChanged?.();
+    } catch {
+      setErrorMsg('Failed to delete category.');
     }
   };
 
-  // Reset to Defaults
-  const handleResetDefaults = async () => {
-    try {
-      await db.categories.clear();
-      await db.categories.bulkAdd(DEFAULT_CATEGORIES);
-      playBeep('success');
-      showToast('Categories reset to defaults');
-      await loadData();
-      if (onCategoriesChanged) onCategoriesChanged();
-    } catch (err) {
-      console.error('Failed to reset categories:', err);
+  const handleInitiateDelete = (cat: Category) => {
+    const count = productCounts[cat.id] || 0;
+    if (count > 0) {
+      const otherCats = categories.filter(c => c.id !== cat.id);
+      setReassignTargetId(otherCats[0]?.id || 'tops');
+      setCategoryToDelete(cat);
+    } else {
+      executeDelete(cat.id);
     }
+  };
+
+  const handleResetDefaults = async () => {
+    await db.categories.clear();
+    await db.categories.bulkAdd(DEFAULT_CATEGORIES);
+    playBeep('success');
+    showToast('Categories reset to retail defaults');
+    await loadData();
+    onCategoriesChanged?.();
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
-      <div className="bg-white rounded-2xl max-w-lg w-full p-6 sm:p-7 shadow-xl border border-[#E5E5E7] animate-in fade-in-50 max-h-[90vh] flex flex-col">
-        
-        {/* Header */}
-        <div className="flex items-center justify-between pb-4 border-b border-[#E5E5E7]">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-[#1D1D1F] text-white flex items-center justify-center shadow-xs">
-              <FolderTree className="w-5 h-5" />
+    <div className="fixed inset-0 z-50 bg-zinc-950/70 backdrop-blur-sm flex items-center justify-center p-4">
+      <div className="bg-white dark:bg-zinc-900 rounded-2xl max-w-lg w-full p-6 shadow-2xl border border-zinc-200 dark:border-zinc-800 max-h-[90vh] flex flex-col">
+        <div className="flex items-center justify-between pb-4 border-b border-zinc-200 dark:border-zinc-800">
+          <div className="flex items-center gap-2.5">
+            <div className="w-8 h-8 rounded-lg bg-zinc-950 dark:bg-zinc-100 text-white dark:text-zinc-950 flex items-center justify-center">
+              <FolderTree className="w-4 h-4" />
             </div>
             <div>
-              <h2 className="font-bold text-base text-[#1D1D1F]">Manage Product Categories</h2>
-              <p className="text-xs text-[#86868B]">
-                Add, rename, or remove product classification categories
+              <h2 className="font-semibold text-sm text-zinc-950 dark:text-zinc-50">Product Categories</h2>
+              <p className="text-xs text-zinc-500 dark:text-zinc-400">
+                Organize products for quick filtering at the register
               </p>
             </div>
           </div>
 
           <button
+            type="button"
             onClick={onClose}
-            className="text-[#86868B] hover:text-[#1D1D1F] p-1 rounded-lg transition-colors cursor-pointer"
+            className="text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100 p-1 rounded-lg cursor-pointer"
           >
-            <X className="w-5 h-5" />
+            <X className="w-4 h-4" />
           </button>
         </div>
 
-        {/* Toast */}
         {toastMessage && (
-          <div className="mt-3 p-2.5 bg-[#F5F5F7] text-[#1D1D1F] border border-[#E5E5E7] rounded-xl text-xs font-semibold text-center">
+          <div className="mt-3 p-2 bg-zinc-100 dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100 rounded-lg text-xs font-medium text-center">
             {toastMessage}
           </div>
         )}
 
-        {/* Error */}
         {errorMsg && (
-          <div className="mt-3 p-2.5 bg-red-50 text-red-900 border border-red-200 rounded-xl text-xs font-semibold flex items-center gap-2">
-            <AlertCircle className="w-4 h-4 text-red-600 shrink-0" />
+          <div className="mt-3 p-2.5 bg-rose-50 dark:bg-rose-950/40 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-800 rounded-lg text-xs flex items-center gap-2">
+            <AlertCircle className="w-4 h-4 shrink-0" />
             <span>{errorMsg}</span>
           </div>
         )}
 
-        {/* Main Content Area */}
-        <div className="flex-1 overflow-y-auto py-4 space-y-4 pr-1">
-
-          {/* Add Category Form (Lead / Admin Only) */}
+        <div className="flex-1 overflow-y-auto py-4 space-y-4">
           {isAdminOrLead ? (
-            <form onSubmit={handleAddCategory} className="p-3.5 rounded-xl bg-[#F5F5F7] border border-[#E5E5E7] space-y-2">
-              <label className="text-xs font-semibold text-[#1D1D1F] block">
-                Add New Category
-              </label>
-              <div className="flex items-center gap-2">
-                <input
-                  type="text"
-                  value={newCatName}
-                  onChange={e => setNewCatName(e.target.value)}
-                  placeholder="e.g. Stationery, Sports Kit, Rainwear..."
-                  className="flex-1 h-9 px-3 rounded-xl border border-[#E5E5E7] text-xs font-medium bg-white focus:outline-none focus:border-[#1D1D1F]"
-                />
-                <button
-                  type="submit"
-                  disabled={!newCatName.trim()}
-                  className="h-9 px-4 rounded-xl bg-[#1D1D1F] hover:bg-[#333336] text-white text-xs font-semibold flex items-center gap-1.5 transition-colors shadow-xs disabled:opacity-50 cursor-pointer"
-                >
-                  <Plus className="w-3.5 h-3.5" />
-                  <span>Add</span>
-                </button>
-              </div>
+            <form onSubmit={handleAddCategory} className="flex items-center gap-2">
+              <input
+                type="text"
+                value={newCatName}
+                onChange={e => setNewCatName(e.target.value)}
+                placeholder="New category (e.g. Outerwear, Handbags)"
+                className="flex-1 h-9 px-3 rounded-lg border border-zinc-200 dark:border-zinc-800 text-xs bg-white dark:bg-zinc-950 text-zinc-950 dark:text-zinc-50 focus:outline-none focus:ring-2 focus:ring-zinc-900 dark:focus:ring-zinc-100"
+              />
+              <button
+                type="submit"
+                disabled={!newCatName.trim()}
+                className="h-9 px-3.5 rounded-lg bg-zinc-950 dark:bg-zinc-100 text-white dark:text-zinc-950 text-xs font-semibold flex items-center gap-1 disabled:opacity-40 cursor-pointer"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>Add</span>
+              </button>
             </form>
           ) : (
-            <div className="p-3 rounded-xl bg-[#F5F5F7] border border-[#E5E5E7] text-[#515154] text-xs flex items-center gap-2">
-              <ShieldCheck className="w-4 h-4 text-[#1D1D1F] shrink-0" />
-              <span>Shift Lead or Store Admin PIN required to create or modify categories.</span>
+            <div className="p-3 rounded-lg bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 text-xs text-zinc-500 flex items-center gap-2">
+              <ShieldCheck className="w-4 h-4 shrink-0" />
+              <span>Shift Lead or Admin PIN required to edit categories.</span>
             </div>
           )}
 
-          {/* Category List */}
-          <div className="space-y-2">
-            <div className="flex items-center justify-between text-[11px] font-semibold text-[#86868B] uppercase px-1 tracking-wider">
-              <span>Category Name</span>
-              <span>Items Linked / Actions</span>
-            </div>
-
+          <div className="divide-y divide-zinc-100 dark:divide-zinc-800 border border-zinc-200 dark:border-zinc-800 rounded-xl overflow-hidden">
             {categories.map(cat => {
               const count = productCounts[cat.id] || 0;
               const isEditing = editingId === cat.id;
 
               return (
-                <div
-                  key={cat.id}
-                  className="p-3 rounded-xl bg-white border border-[#E5E5E7] hover:border-[#D2D2D7] transition-all flex items-center justify-between gap-3 shadow-xs"
-                >
-                  <div className="flex items-center gap-2.5 flex-1 min-w-0">
-                    <div className="w-8 h-8 rounded-lg bg-[#F5F5F7] text-[#1D1D1F] flex items-center justify-center font-bold text-xs shrink-0">
-                      <Package className="w-4 h-4" />
+                <div key={cat.id} className="px-3.5 py-2.5 bg-white dark:bg-zinc-900 flex items-center justify-between gap-3">
+                  {isEditing ? (
+                    <div className="flex items-center gap-1.5 flex-1">
+                      <input
+                        type="text"
+                        value={editingName}
+                        onChange={e => setEditingName(e.target.value)}
+                        className="h-8 px-2.5 rounded-md border border-zinc-300 dark:border-zinc-700 text-xs bg-white dark:bg-zinc-950 flex-1"
+                        autoFocus
+                        onKeyDown={e => {
+                          if (e.key === 'Enter') saveEditing(cat.id);
+                          if (e.key === 'Escape') setEditingId(null);
+                        }}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => saveEditing(cat.id)}
+                        className="p-1.5 rounded-md bg-zinc-950 dark:bg-zinc-100 text-white dark:text-zinc-950 cursor-pointer"
+                      >
+                        <Check className="w-3.5 h-3.5" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setEditingId(null)}
+                        className="p-1.5 rounded-md bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300 cursor-pointer"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
                     </div>
-
-                    {isEditing ? (
-                      <div className="flex items-center gap-1.5 flex-1">
-                        <input
-                          type="text"
-                          value={editingName}
-                          onChange={e => setEditingName(e.target.value)}
-                          className="h-8 px-2.5 rounded-lg border border-[#1D1D1F] text-xs font-medium bg-white flex-1 focus:outline-none"
-                          autoFocus
-                          onKeyDown={e => {
-                            if (e.key === 'Enter') saveEditing(cat.id);
-                            if (e.key === 'Escape') setEditingId(null);
-                          }}
-                        />
-                        <button
-                          type="button"
-                          onClick={() => saveEditing(cat.id)}
-                          className="p-1.5 rounded-lg bg-[#1D1D1F] text-white hover:bg-[#333336]"
-                          title="Save"
-                        >
-                          <Check className="w-3.5 h-3.5" />
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setEditingId(null)}
-                          className="p-1.5 rounded-lg bg-[#F5F5F7] text-[#515154] hover:bg-[#E8E8ED]"
-                          title="Cancel"
-                        >
-                          <X className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
-                    ) : (
+                  ) : (
+                    <>
                       <div className="min-w-0">
-                        <div className="font-semibold text-xs text-[#1D1D1F] capitalize truncate">
+                        <div className="text-xs font-semibold text-zinc-900 dark:text-zinc-100 truncate">
                           {cat.name}
                         </div>
-                        <div className="text-[10px] font-mono text-[#86868B]">
-                          id: {cat.id}
+                        <div className="text-[11px] text-zinc-500 dark:text-zinc-400 tabular-nums">
+                          {count} product{count === 1 ? '' : 's'}
                         </div>
                       </div>
-                    )}
-                  </div>
-
-                  {!isEditing && (
-                    <div className="flex items-center gap-2 shrink-0">
-                      <span className="text-[11px] font-medium text-[#515154] bg-[#F5F5F7] px-2 py-0.5 rounded-md border border-[#E5E5E7]">
-                        {count} item{count === 1 ? '' : 's'}
-                      </span>
 
                       {isAdminOrLead && (
                         <div className="flex items-center gap-1">
                           <button
                             type="button"
-                            onClick={() => startEditing(cat)}
-                            className="p-1.5 rounded-lg hover:bg-[#F5F5F7] text-[#1D1D1F] transition-colors cursor-pointer"
-                            title="Rename Category"
+                            onClick={() => {
+                              setEditingId(cat.id);
+                              setEditingName(cat.name);
+                            }}
+                            className="p-1.5 rounded-md hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-600 dark:text-zinc-300 cursor-pointer"
                           >
                             <Edit2 className="w-3.5 h-3.5" />
                           </button>
-
                           <button
                             type="button"
                             onClick={() => handleInitiateDelete(cat)}
-                            className="p-1.5 rounded-lg hover:bg-red-50 text-red-600 transition-colors cursor-pointer"
-                            title="Delete Category"
+                            className="p-1.5 rounded-md hover:bg-rose-50 dark:hover:bg-rose-950/40 text-rose-600 dark:text-rose-400 cursor-pointer"
                           >
                             <Trash2 className="w-3.5 h-3.5" />
                           </button>
                         </div>
                       )}
-                    </div>
+                    </>
                   )}
                 </div>
               );
             })}
           </div>
 
-          {/* Delete with Reassignment Warning Dialog */}
           {categoryToDelete && (
-            <div className="p-4 rounded-xl bg-[#F5F5F7] border border-amber-200 space-y-3 animate-in fade-in">
-              <div className="flex items-start gap-2">
-                <AlertCircle className="w-4 h-4 text-amber-700 shrink-0 mt-0.5" />
-                <div>
-                  <h4 className="font-bold text-xs text-[#1D1D1F]">
-                    Reassign Products in "{categoryToDelete.name}"
-                  </h4>
-                  <p className="text-[11px] text-[#515154] mt-0.5">
-                    There are <strong>{productCounts[categoryToDelete.id] || 0} product(s)</strong> currently assigned to this category. Select which category to move them to before deleting:
-                  </p>
-                </div>
-              </div>
-
+            <div className="p-3.5 rounded-xl bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 space-y-2.5">
+              <p className="text-xs text-amber-900 dark:text-amber-200">
+                Reassign <strong>{productCounts[categoryToDelete.id]}</strong> product(s) from{' '}
+                <strong>{categoryToDelete.name}</strong> before deleting:
+              </p>
               <div className="flex items-center gap-2">
                 <select
                   value={reassignTargetId}
                   onChange={e => setReassignTargetId(e.target.value)}
-                  className="flex-1 h-9 px-3 rounded-xl border border-[#E5E5E7] text-xs font-medium bg-white focus:outline-none"
+                  className="flex-1 h-8 px-2.5 rounded-lg border border-zinc-200 dark:border-zinc-800 text-xs bg-white dark:bg-zinc-950"
                 >
                   {categories
                     .filter(c => c.id !== categoryToDelete.id)
@@ -403,38 +327,34 @@ export const CategoryManagerModal: React.FC<CategoryManagerModalProps> = ({
                       </option>
                     ))}
                 </select>
-
                 <button
                   type="button"
                   onClick={() => executeDelete(categoryToDelete.id, reassignTargetId)}
-                  className="h-9 px-3 rounded-xl bg-red-600 hover:bg-red-700 text-white text-xs font-semibold transition-colors cursor-pointer"
+                  className="h-8 px-3 rounded-lg bg-rose-600 text-white text-xs font-semibold cursor-pointer"
                 >
-                  Reassign &amp; Delete
+                  Move &amp; Delete
                 </button>
-
                 <button
                   type="button"
                   onClick={() => setCategoryToDelete(null)}
-                  className="h-9 px-2.5 rounded-xl bg-white border border-[#E5E5E7] text-[#1D1D1F] text-xs font-semibold cursor-pointer"
+                  className="h-8 px-2.5 rounded-lg border border-zinc-200 dark:border-zinc-800 text-xs cursor-pointer"
                 >
                   Cancel
                 </button>
               </div>
             </div>
           )}
-
         </div>
 
-        {/* Footer */}
-        <div className="pt-3 border-t border-[#E5E5E7] flex items-center justify-between text-[11px]">
+        <div className="pt-3 border-t border-zinc-200 dark:border-zinc-800 flex items-center justify-between">
           {isAdminOrLead ? (
             <button
               type="button"
               onClick={handleResetDefaults}
-              className="text-[#86868B] hover:text-[#1D1D1F] flex items-center gap-1 font-medium cursor-pointer transition-colors"
+              className="text-xs text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100 flex items-center gap-1 cursor-pointer"
             >
               <RotateCcw className="w-3 h-3" />
-              <span>Reset to Defaults</span>
+              <span>Reset Defaults</span>
             </button>
           ) : (
             <div />
@@ -443,12 +363,11 @@ export const CategoryManagerModal: React.FC<CategoryManagerModalProps> = ({
           <button
             type="button"
             onClick={onClose}
-            className="px-4 py-2 rounded-xl bg-[#1D1D1F] hover:bg-[#333336] text-white text-xs font-semibold cursor-pointer transition-colors"
+            className="px-4 py-2 rounded-lg bg-zinc-950 dark:bg-zinc-100 text-white dark:text-zinc-950 text-xs font-semibold cursor-pointer"
           >
             Done
           </button>
         </div>
-
       </div>
     </div>
   );

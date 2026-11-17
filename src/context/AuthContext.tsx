@@ -1,9 +1,9 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { db } from '../db/db';
-import { type UserProfile, type UserRole } from '../types';
+import { type UserProfile } from '../types';
 import { playBeep } from '../lib/printer';
 
-export type AppTab = 'billing' | 'prices' | 'inventory' | 'schools' | 'bills' | 'settings';
+export type AppTab = 'billing' | 'catalog' | 'bills' | 'settings';
 
 interface AuthContextType {
   currentUser: UserProfile | null;
@@ -28,13 +28,12 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-const ACTIVE_USER_STORAGE_KEY = 'nandalaya_active_user_id';
+const ACTIVE_USER_STORAGE_KEY = 'counterly_active_user_id';
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [currentUser, setCurrentUser] = useState<UserProfile | null>(null);
   const [users, setUsers] = useState<UserProfile[]>([]);
-  const [isLocked, setIsLocked] = useState<boolean>(false); // Unlocked on boot for seamless usage
-  const [isInitializing, setIsInitializing] = useState(true);
+  const [isLocked, setIsLocked] = useState<boolean>(false);
   const [failedAttempts, setFailedAttempts] = useState<number>(0);
   const [lockoutUntil, setLockoutUntil] = useState<number>(0);
 
@@ -43,7 +42,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const allUsers = await db.users.toArray();
       setUsers(allUsers);
 
-      const savedUserId = localStorage.getItem(ACTIVE_USER_STORAGE_KEY);
+      const savedUserId = localStorage.getItem(ACTIVE_USER_STORAGE_KEY) || localStorage.getItem('nandalaya_active_user_id');
       if (savedUserId) {
         const found = allUsers.find(u => u.id === savedUserId && u.active);
         if (found) {
@@ -52,7 +51,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         }
       }
 
-      // Default to admin on first load
       const adminUser = allUsers.find(u => u.role === 'admin' && u.active) || allUsers[0];
       if (adminUser) {
         setCurrentUser(adminUser);
@@ -60,8 +58,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
     } catch (err) {
       console.error('Failed to load users:', err);
-    } finally {
-      setIsInitializing(false);
     }
   };
 
@@ -70,7 +66,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, []);
 
   const loginWithPin = async (pin: string): Promise<{ success: boolean; user?: UserProfile; message?: string }> => {
-    // Check if terminal is temporarily locked due to multiple failed attempts
     const now = Date.now();
     if (now < lockoutUntil) {
       const secondsLeft = Math.ceil((lockoutUntil - now) / 1000);
@@ -103,8 +98,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     playBeep('warn');
 
     if (newFailedCount >= 5) {
-      const lockDuration = 30 * 1000; // 30 seconds lockout
-      setLockoutUntil(now + lockDuration);
+      setLockoutUntil(now + 30 * 1000);
       setFailedAttempts(0);
       return {
         success: false,
@@ -120,13 +114,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     };
   };
 
-  const switchUserWithPin = async (pin: string) => {
-    return loginWithPin(pin);
-  };
+  const switchUserWithPin = async (pin: string) => loginWithPin(pin);
 
-  const lockScreen = () => {
-    setIsLocked(true);
-  };
+  const lockScreen = () => setIsLocked(true);
 
   const unlockScreen = async (pin: string): Promise<boolean> => {
     const res = await loginWithPin(pin);
@@ -152,52 +142,25 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const canAccessTab = (tab: AppTab): boolean => {
     if (!currentUser) return false;
-    if (currentUser.role === 'admin') return true;
-
-    if (currentUser.role === 'manager') {
-      return ['billing', 'prices', 'inventory', 'schools', 'bills', 'settings'].includes(tab);
-    }
-
-    // Cashier role: Allowed Billing and Bills history
+    if (currentUser.role === 'admin' || currentUser.role === 'manager') return true;
     if (currentUser.role === 'cashier') {
-      return ['billing', 'bills'].includes(tab);
+      return tab === 'billing' || tab === 'bills';
     }
-
     return false;
   };
 
-  const canEditPrices = (): boolean => {
-    if (!currentUser) return false;
-    return currentUser.role === 'admin' || currentUser.role === 'manager';
-  };
+  const canEditPrices = (): boolean => !!currentUser && (currentUser.role === 'admin' || currentUser.role === 'manager');
+  const canAdjustStock = (): boolean => !!currentUser && (currentUser.role === 'admin' || currentUser.role === 'manager');
+  const canVoidBills = (): boolean => !!currentUser && (currentUser.role === 'admin' || currentUser.role === 'manager');
+  const canManageSettings = (): boolean => !!currentUser && currentUser.role === 'admin';
 
-  const canAdjustStock = (): boolean => {
-    if (!currentUser) return false;
-    return currentUser.role === 'admin' || currentUser.role === 'manager';
-  };
-
-  const canVoidBills = (): boolean => {
-    if (!currentUser) return false;
-    return currentUser.role === 'admin' || currentUser.role === 'manager';
-  };
-
-  const canManageSettings = (): boolean => {
-    if (!currentUser) return false;
-    return currentUser.role === 'admin';
-  };
-
-  const canGiveDiscount = (type: 'flat' | 'percent', value: number, total: number): boolean => {
+  const canGiveDiscount = (type: 'flat' | 'percent', value: number): boolean => {
     if (!currentUser) return false;
     if (currentUser.role === 'admin' || currentUser.role === 'manager') return true;
-
-    // Cashier discount limit checks
     if (type === 'percent') {
-      const maxPct = currentUser.max_discount_percent ?? 5;
-      return value <= maxPct;
-    } else {
-      const maxAmt = currentUser.max_discount_amount ?? 100;
-      return value <= maxAmt;
+      return value <= (currentUser.max_discount_percent ?? 10);
     }
+    return value <= (currentUser.max_discount_amount ?? 25);
   };
 
   const updateUserPin = async (userId: string, newPin: string): Promise<boolean> => {
@@ -206,8 +169,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       await db.users.update(userId, { pin: newPin.trim() });
       await loadUsers();
       return true;
-    } catch (err) {
-      console.error('Failed to update PIN:', err);
+    } catch {
       return false;
     }
   };
@@ -218,39 +180,34 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         await db.users.update(user.id, user);
       } else {
         const newId = `usr_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
-        const newUser: UserProfile = {
+        await db.users.add({
           id: newId,
           name: user.name || 'New Staff',
           role: user.role || 'cashier',
           pin: user.pin || '123456',
           phone: user.phone || '',
           active: user.active ?? true,
-          max_discount_percent: user.max_discount_percent ?? 5,
-          max_discount_amount: user.max_discount_amount ?? 100,
+          max_discount_percent: user.max_discount_percent ?? 10,
+          max_discount_amount: user.max_discount_amount ?? 25,
           created_at: new Date().toISOString(),
-        };
-        await db.users.add(newUser);
+        });
       }
       await loadUsers();
       return true;
-    } catch (err) {
-      console.error('Failed to save user:', err);
+    } catch {
       return false;
     }
   };
 
   const deleteUserProfile = async (userId: string): Promise<boolean> => {
     try {
-      // Prevent deleting last admin
       const allUsers = await db.users.toArray();
       const adminCount = allUsers.filter(u => u.role === 'admin' && u.id !== userId).length;
       if (adminCount === 0) return false;
-
       await db.users.delete(userId);
       await loadUsers();
       return true;
-    } catch (err) {
-      console.error('Failed to delete user:', err);
+    } catch {
       return false;
     }
   };

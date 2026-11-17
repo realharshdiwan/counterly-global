@@ -14,6 +14,24 @@ export const PinLoginScreen: React.FC<PinLoginScreenProps> = ({ onSuccess }) => 
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [shake, setShake] = useState(false);
   const [storeName, setStoreName] = useState<string>('');
+  const secretTapRef = React.useRef<{ count: number; timer: number | null }>({ count: 0, timer: null });
+
+  const handleBrandTap = (e: React.MouseEvent) => {
+    if (e.shiftKey) {
+      window.dispatchEvent(new CustomEvent('counterly:open-vendor'));
+      return;
+    }
+    secretTapRef.current.count += 1;
+    if (secretTapRef.current.timer) window.clearTimeout(secretTapRef.current.timer);
+    if (secretTapRef.current.count >= 5) {
+      secretTapRef.current.count = 0;
+      window.dispatchEvent(new CustomEvent('counterly:open-vendor'));
+      return;
+    }
+    secretTapRef.current.timer = window.setTimeout(() => {
+      secretTapRef.current.count = 0;
+    }, 1800);
+  };
 
   useEffect(() => {
     db.shop_config.toArray().then(cfgs => {
@@ -87,27 +105,27 @@ export const PinLoginScreen: React.FC<PinLoginScreenProps> = ({ onSuccess }) => 
   }, [pin]);
 
   return (
-    <div className="fixed inset-0 z-50 bg-[#F5F5F7] flex flex-col items-center justify-center p-4">
+    <div className="fixed inset-0 z-50 bg-[#F5F5F7] dark:bg-zinc-950 flex flex-col items-center justify-center p-4">
       {/* Container Box */}
-      <div className="bg-white rounded-2xl border border-[#E5E5E7] shadow-xl max-w-sm w-full p-6 sm:p-8 flex flex-col items-center">
+      <div className="bg-white dark:bg-zinc-900 rounded-2xl border border-[#E5E5E7] dark:border-zinc-800 shadow-xl max-w-sm w-full p-6 sm:p-8 flex flex-col items-center">
         
         {/* Brand Header */}
-        <div className="text-center mb-5">
-          <span className="font-bold text-2xl tracking-tight text-[#1D1D1F]">
-            Counterly
+        <div onClick={handleBrandTap} className="text-center mb-5 select-none">
+          <span className="font-bold text-2xl tracking-tight text-[#1D1D1F] dark:text-zinc-100">
+            SikkaDesk
           </span>
-          <p className="text-xs font-semibold text-[#86868B] mt-0.5">
+          <p className="text-xs font-semibold text-[#86868B] dark:text-zinc-400 mt-0.5">
             {storeName ? `${storeName} · Staff Terminal` : 'Store POS · Staff Terminal'}
           </p>
         </div>
 
         {/* Passcode Instruction */}
         <div className="w-full text-center mb-5">
-          <div className="w-10 h-10 rounded-xl bg-[#F5F5F7] text-[#1D1D1F] flex items-center justify-center mx-auto mb-2">
+          <div className="w-10 h-10 rounded-xl bg-[#F5F5F7] dark:bg-zinc-800 text-[#1D1D1F] dark:text-zinc-100 flex items-center justify-center mx-auto mb-2">
             <Lock className="w-5 h-5" />
           </div>
-          <p className="text-base font-bold text-[#1D1D1F]">Enter 6-Digit PIN</p>
-          <p className="text-xs text-[#86868B] mt-0.5">
+          <p className="text-base font-bold text-[#1D1D1F] dark:text-zinc-100">Enter 6-Digit PIN</p>
+          <p className="text-xs text-[#86868B] dark:text-zinc-400 mt-0.5">
             Auto-detects your staff profile and permissions
           </p>
         </div>
@@ -121,8 +139,8 @@ export const PinLoginScreen: React.FC<PinLoginScreenProps> = ({ onSuccess }) => 
                 key={index}
                 className={`w-3.5 h-3.5 rounded-full transition-all duration-150 border-2 ${
                   isFilled
-                    ? 'bg-[#1D1D1F] border-[#1D1D1F] scale-110 shadow-xs'
-                    : 'bg-white border-[#E5E5E7]'
+                    ? 'bg-[#1D1D1F] dark:bg-zinc-100 border-[#1D1D1F] dark:border-zinc-100 scale-110 shadow-xs'
+                    : 'bg-white dark:bg-zinc-900 border-[#E5E5E7] dark:border-zinc-700'
                 }`}
               />
             );
@@ -132,7 +150,7 @@ export const PinLoginScreen: React.FC<PinLoginScreenProps> = ({ onSuccess }) => 
         {/* Error message */}
         <div className="h-6 mt-1 flex items-center justify-center">
           {error && (
-            <p className="text-xs font-semibold text-red-600 animate-in fade-in">
+            <p className="text-xs font-semibold text-red-600 dark:text-red-400 animate-in fade-in">
               {error}
             </p>
           )}
@@ -146,7 +164,7 @@ export const PinLoginScreen: React.FC<PinLoginScreenProps> = ({ onSuccess }) => 
               type="button"
               onClick={() => handleDigitClick(num)}
               disabled={isSubmitting}
-              className="h-14 rounded-2xl bg-[#F5F5F7] hover:bg-[#E8E8ED] active:scale-95 text-xl font-bold text-[#1D1D1F] transition-all flex items-center justify-center shadow-xs border border-[#E5E5E7] focus:outline-none cursor-pointer"
+              className="h-14 rounded-2xl bg-[#F5F5F7] dark:bg-zinc-800 hover:bg-[#E8E8ED] dark:hover:bg-zinc-700 active:scale-95 text-xl font-bold text-[#1D1D1F] dark:text-zinc-100 transition-all flex items-center justify-center shadow-xs border border-[#E5E5E7] dark:border-zinc-700 focus:outline-none cursor-pointer"
             >
               {num}
             </button>
@@ -156,7 +174,7 @@ export const PinLoginScreen: React.FC<PinLoginScreenProps> = ({ onSuccess }) => 
             type="button"
             onClick={handleClear}
             disabled={isSubmitting || pin.length === 0}
-            className="h-14 rounded-2xl bg-[#F5F5F7] hover:bg-[#E8E8ED] active:scale-95 text-xs font-bold uppercase text-[#86868B] transition-all flex items-center justify-center shadow-xs border border-[#E5E5E7] focus:outline-none disabled:opacity-40 cursor-pointer"
+            className="h-14 rounded-2xl bg-[#F5F5F7] dark:bg-zinc-800 hover:bg-[#E8E8ED] dark:hover:bg-zinc-700 active:scale-95 text-xs font-bold uppercase text-[#86868B] dark:text-zinc-400 transition-all flex items-center justify-center shadow-xs border border-[#E5E5E7] dark:border-zinc-700 focus:outline-none disabled:opacity-40 cursor-pointer"
           >
             Clear
           </button>
@@ -165,7 +183,7 @@ export const PinLoginScreen: React.FC<PinLoginScreenProps> = ({ onSuccess }) => 
             type="button"
             onClick={() => handleDigitClick('0')}
             disabled={isSubmitting}
-            className="h-14 rounded-2xl bg-[#F5F5F7] hover:bg-[#E8E8ED] active:scale-95 text-xl font-bold text-[#1D1D1F] transition-all flex items-center justify-center shadow-xs border border-[#E5E5E7] focus:outline-none cursor-pointer"
+            className="h-14 rounded-2xl bg-[#F5F5F7] dark:bg-zinc-800 hover:bg-[#E8E8ED] dark:hover:bg-zinc-700 active:scale-95 text-xl font-bold text-[#1D1D1F] dark:text-zinc-100 transition-all flex items-center justify-center shadow-xs border border-[#E5E5E7] dark:border-zinc-700 focus:outline-none cursor-pointer"
           >
             0
           </button>
@@ -174,7 +192,7 @@ export const PinLoginScreen: React.FC<PinLoginScreenProps> = ({ onSuccess }) => 
             type="button"
             onClick={handleBackspace}
             disabled={isSubmitting || pin.length === 0}
-            className="h-14 rounded-2xl bg-[#F5F5F7] hover:bg-[#E8E8ED] active:scale-95 text-[#86868B] transition-all flex items-center justify-center shadow-xs border border-[#E5E5E7] focus:outline-none disabled:opacity-40 cursor-pointer"
+            className="h-14 rounded-2xl bg-[#F5F5F7] dark:bg-zinc-800 hover:bg-[#E8E8ED] dark:hover:bg-zinc-700 active:scale-95 text-[#86868B] dark:text-zinc-400 transition-all flex items-center justify-center shadow-xs border border-[#E5E5E7] dark:border-zinc-700 focus:outline-none disabled:opacity-40 cursor-pointer"
             title="Backspace"
           >
             <Delete className="w-5 h-5" />
@@ -182,9 +200,9 @@ export const PinLoginScreen: React.FC<PinLoginScreenProps> = ({ onSuccess }) => 
         </div>
 
         {/* Secure Access Footer Note */}
-        <div className="mt-5 pt-3 border-t border-[#E5E5E7] w-full text-center">
-          <p className="text-[11px] text-[#86868B] flex items-center justify-center gap-1 font-medium">
-            <ShieldCheck className="w-3.5 h-3.5 text-[#1D1D1F]" />
+        <div className="mt-5 pt-3 border-t border-[#E5E5E7] dark:border-zinc-800 w-full text-center">
+          <p className="text-[11px] text-[#86868B] dark:text-zinc-400 flex items-center justify-center gap-1 font-medium">
+            <ShieldCheck className="w-3.5 h-3.5 text-[#1D1D1F] dark:text-zinc-200" />
             <span>Encrypted POS Session</span>
           </p>
         </div>

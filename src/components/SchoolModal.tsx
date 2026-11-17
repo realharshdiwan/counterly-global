@@ -11,7 +11,9 @@ import {
   FileText
 } from 'lucide-react';
 import { db } from '../db/db';
-import { type School, type Product, type SizeItem, type PriceEntry } from '../types';
+import { type School, type PriceEntry, type StoreBusinessType, type ShopConfig } from '../types';
+import { getCatalogTabMeta } from '../lib/catalogLabels';
+import { formatMoney } from '../lib/locale';
 
 interface SchoolModalProps {
   isOpen: boolean;
@@ -35,8 +37,26 @@ export const SchoolModal: React.FC<SchoolModalProps> = ({
   const [active, setActive] = useState(true);
 
   const [recalcRates, setRecalcRates] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [storeType, setStoreType] = useState<StoreBusinessType | undefined>('apparel');
+  const [shopConfig, setShopConfig] = useState<ShopConfig | null>(null);
+
+  useEffect(() => {
+    async function loadStoreType() {
+      const cfgs = await db.shop_config.toArray();
+      if (cfgs.length > 0) {
+        setStoreType(cfgs[0].store_type);
+        setShopConfig(cfgs[0]);
+      }
+    }
+    loadStoreType();
+    setConfirmDelete(false);
+  }, [isOpen]);
+
+  const catalogMeta = getCatalogTabMeta(storeType);
+  const CatalogIcon = catalogMeta.icon;
 
   useEffect(() => {
     if (schoolToEdit) {
@@ -84,7 +104,7 @@ export const SchoolModal: React.FC<SchoolModalProps> = ({
     const trimmedCode = code.trim().toUpperCase();
 
     if (!trimmedName) {
-      setErrorMsg('Please enter school name');
+      setErrorMsg(`Please enter ${catalogMeta.entityName.toLowerCase()} name`);
       return;
     }
     if (!trimmedCode) {
@@ -190,8 +210,8 @@ export const SchoolModal: React.FC<SchoolModalProps> = ({
       onSchoolSaved(schoolRecord);
       onClose();
     } catch (err: unknown) {
-      console.error('Failed to save school:', err);
-      setErrorMsg((err as Error)?.message || 'Failed to save school');
+      console.error(`Failed to save ${catalogMeta.entityName.toLowerCase()}:`, err);
+      setErrorMsg((err as Error)?.message || `Failed to save ${catalogMeta.entityName.toLowerCase()}`);
     } finally {
       setIsSaving(false);
     }
@@ -199,7 +219,8 @@ export const SchoolModal: React.FC<SchoolModalProps> = ({
 
   const handleDelete = async () => {
     if (!schoolToEdit) return;
-    if (!window.confirm(`Are you sure you want to delete school "${schoolToEdit.name}"? All associated rate card mappings will be removed.`)) {
+    if (!confirmDelete) {
+      setConfirmDelete(true);
       return;
     }
 
@@ -210,7 +231,7 @@ export const SchoolModal: React.FC<SchoolModalProps> = ({
       onSchoolSaved(schoolToEdit);
       onClose();
     } catch (err: unknown) {
-      console.error('Failed to delete school:', err);
+      console.error('Failed to delete account:', err);
       setErrorMsg((err as Error)?.message || 'Failed to delete');
     } finally {
       setIsSaving(false);
@@ -219,24 +240,24 @@ export const SchoolModal: React.FC<SchoolModalProps> = ({
 
   // Preview calculations
   const parsedMult = parseFloat(multiplier) || 1.0;
-  const sampleShirt = Math.round((260 * parsedMult) / 5) * 5;
-  const samplePant = Math.round((330 * parsedMult) / 5) * 5;
+  const sampleShirt = Math.round((25 * parsedMult) * 100) / 100;
+  const samplePant = Math.round((45 * parsedMult) * 100) / 100;
 
   return (
     <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4 overflow-y-auto">
-      <div className="bg-white rounded-2xl max-w-lg w-full shadow-xl border border-[#E5E5E7] overflow-hidden my-auto animate-in fade-in-50">
+      <div className="bg-white dark:bg-zinc-950 rounded-2xl max-w-lg w-full shadow-xl border border-[#E5E5E7] dark:border-zinc-800 overflow-hidden my-auto animate-in fade-in-50">
         {/* Header */}
-        <div className="p-4 bg-[#F5F5F7] border-b border-[#E5E5E7] flex items-center justify-between">
+        <div className="p-4 bg-[#F5F5F7] dark:bg-zinc-900 border-b border-[#E5E5E7] dark:border-zinc-800 flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <div className="w-8 h-8 rounded-xl bg-[#1D1D1F] text-white flex items-center justify-center">
-              <SchoolIcon className="w-4 h-4" />
+            <div className="w-8 h-8 rounded-xl bg-[#1D1D1F] dark:bg-zinc-100 text-white dark:text-zinc-900 flex items-center justify-center">
+              <CatalogIcon className="w-4 h-4" />
             </div>
             <div>
-              <h2 className="font-bold text-base text-[#1D1D1F]">
-                {schoolToEdit ? 'Edit School Master' : 'Add New School'}
+              <h2 className="font-bold text-base text-[#1D1D1F] dark:text-zinc-100">
+                {schoolToEdit ? `Edit ${catalogMeta.entityName} Master` : `Add New ${catalogMeta.entityName}`}
               </h2>
-              <p className="text-xs text-[#86868B]">
-                Registers school for instant 1-tap counter billing and price books
+              <p className="text-xs text-[#86868B] dark:text-zinc-400">
+                Registers {catalogMeta.entityName.toLowerCase()} for instant 1-tap counter billing and price books
               </p>
             </div>
           </div>
@@ -246,7 +267,7 @@ export const SchoolModal: React.FC<SchoolModalProps> = ({
         </div>
 
         {/* Form Body */}
-        <form onSubmit={handleSave} className="p-5 flex flex-col gap-4 max-h-[75vh] overflow-y-auto">
+        <form onSubmit={handleSave} className="p-5 flex flex-col gap-4 max-h-[75vh] overflow-y-auto bg-white dark:bg-zinc-950">
           {errorMsg && (
             <div className="p-3 rounded-xl bg-red-50 border border-red-200 text-xs font-semibold text-red-700 flex items-center gap-2">
               <AlertCircle className="w-4 h-4 shrink-0" />
@@ -256,16 +277,16 @@ export const SchoolModal: React.FC<SchoolModalProps> = ({
 
           {/* School Name */}
           <div>
-            <label className="text-xs font-medium text-[#515154] block mb-1">
-              School Full Name *
+            <label className="text-xs font-medium text-[#515154] dark:text-zinc-300 block mb-1">
+              {catalogMeta.entityName} Full Name *
             </label>
             <input
               type="text"
               required
               value={name}
               onChange={e => handleNameChange(e.target.value)}
-              placeholder="e.g. Delhi Public School, Sector 45"
-              className="w-full h-10 px-3 rounded-xl border border-[#E5E5E7] text-sm font-medium focus:outline-none focus:border-[#1D1D1F]"
+              placeholder={`e.g. ${catalogMeta.entityName === 'School' ? 'Delhi Public School, Sector 45' : 'Platinum Premium Catalog'}`}
+              className="w-full h-10 px-3 rounded-xl border border-[#E5E5E7] dark:border-zinc-800 text-sm font-medium focus:outline-none focus:border-[#1D1D1F] bg-white dark:bg-zinc-900 text-zinc-950 dark:text-white"
               autoFocus
             />
           </div>
@@ -273,7 +294,7 @@ export const SchoolModal: React.FC<SchoolModalProps> = ({
           {/* Short Code & Pricing Multiplier */}
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="text-xs font-medium text-[#515154] block mb-1">
+              <label className="text-xs font-medium text-[#515154] dark:text-zinc-300 block mb-1">
                 Short Code (Chip Label) *
               </label>
               <input
@@ -283,15 +304,15 @@ export const SchoolModal: React.FC<SchoolModalProps> = ({
                 value={code}
                 onChange={e => setCode(e.target.value.toUpperCase())}
                 placeholder="e.g. DPS, KV, DAV"
-                className="w-full h-10 px-3 rounded-xl border border-[#E5E5E7] text-sm font-bold text-[#1D1D1F] uppercase focus:outline-none focus:border-[#1D1D1F]"
+                className="w-full h-10 px-3 rounded-xl border border-[#E5E5E7] dark:border-zinc-800 text-sm font-bold text-[#1D1D1F] dark:text-zinc-100 uppercase focus:outline-none focus:border-[#1D1D1F] bg-white dark:bg-zinc-900"
               />
-              <span className="text-[10px] text-[#86868B] block mt-0.5">
+              <span className="text-[10px] text-[#86868B] dark:text-zinc-400 block mt-0.5">
                 Displays on counter billing chips
               </span>
             </div>
 
             <div>
-              <label className="text-xs font-medium text-[#515154] block mb-1">
+              <label className="text-xs font-medium text-[#515154] dark:text-zinc-300 block mb-1">
                 Rate Multiplier
               </label>
               <input
@@ -302,49 +323,49 @@ export const SchoolModal: React.FC<SchoolModalProps> = ({
                 value={multiplier}
                 onChange={e => setMultiplier(e.target.value)}
                 placeholder="1.0"
-                className="w-full h-10 px-3 rounded-xl border border-[#E5E5E7] text-sm font-medium focus:outline-none focus:border-[#1D1D1F]"
+                className="w-full h-10 px-3 rounded-xl border border-[#E5E5E7] dark:border-zinc-800 text-sm font-medium focus:outline-none focus:border-[#1D1D1F] bg-white dark:bg-zinc-900 text-zinc-950 dark:text-white"
               />
-              <span className="text-[10px] text-[#86868B] block mt-0.5">
+              <span className="text-[10px] text-[#86868B] dark:text-zinc-400 block mt-0.5">
                 1.0 = standard, 1.15 = +15%
               </span>
             </div>
           </div>
 
           {/* Multiplier Calculation Live Preview */}
-          <div className="p-3 rounded-xl bg-[#F5F5F7] border border-[#E5E5E7] text-xs space-y-1">
-            <div className="font-bold text-[#1D1D1F] flex items-center justify-between">
+          <div className="p-3 rounded-xl bg-[#F5F5F7] dark:bg-zinc-900 border border-[#E5E5E7] dark:border-zinc-800 text-xs space-y-1">
+            <div className="font-bold text-[#1D1D1F] dark:text-zinc-100 flex items-center justify-between">
               <span>Automatic Price Calculation Preview ({parsedMult}x):</span>
             </div>
-            <div className="flex justify-between text-[#86868B]">
-              <span>Base Shirt (₹260):</span>
-              <strong className="text-[#1D1D1F]">₹{sampleShirt}</strong>
+            <div className="flex justify-between text-[#86868B] dark:text-zinc-400">
+              <span>Sample Item A ({formatMoney(25, shopConfig)}):</span>
+              <strong className="text-[#1D1D1F] dark:text-zinc-100">{formatMoney(sampleShirt, shopConfig)}</strong>
             </div>
-            <div className="flex justify-between text-[#86868B]">
-              <span>Base Pant (₹330):</span>
-              <strong className="text-[#1D1D1F]">₹{samplePant}</strong>
+            <div className="flex justify-between text-[#86868B] dark:text-zinc-400">
+              <span>Sample Item B ({formatMoney(45, shopConfig)}):</span>
+              <strong className="text-[#1D1D1F] dark:text-zinc-100">{formatMoney(samplePant, shopConfig)}</strong>
             </div>
-            <p className="text-[10px] text-[#86868B] italic pt-1">
-              Saving this school will automatically seed price cards for all uniform products at these rates.
+            <p className="text-[10px] text-[#86868B] dark:text-zinc-400 italic pt-1">
+              Saving this {catalogMeta.entityName.toLowerCase()} will seed rate card entries at these multiplier values.
             </p>
           </div>
 
           {/* If editing: recalculate rates checkbox */}
           {schoolToEdit && (
-            <label className="flex items-center gap-2 p-2 rounded-xl bg-[#F5F5F7] border border-[#E5E5E7] text-xs font-medium text-[#1D1D1F] cursor-pointer">
+            <label className="flex items-center gap-2 p-2 rounded-xl bg-[#F5F5F7] dark:bg-zinc-900 border border-[#E5E5E7] dark:border-zinc-800 text-xs font-medium text-[#1D1D1F] dark:text-zinc-200 cursor-pointer">
               <input
                 type="checkbox"
                 checked={recalcRates}
                 onChange={e => setRecalcRates(e.target.checked)}
                 className="w-4 h-4 accent-[#1D1D1F] rounded"
               />
-              <span>Recalculate &amp; reset all product prices for this school using multiplier ({parsedMult}x)?</span>
+              <span>Recalculate &amp; reset all product prices for this {catalogMeta.entityName.toLowerCase()} using multiplier ({parsedMult}x)?</span>
             </label>
           )}
 
           {/* Contact & Address */}
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="text-xs font-medium text-[#515154] block mb-1">
+              <label className="text-xs font-medium text-[#515154] dark:text-zinc-300 block mb-1">
                 Contact Phone (Optional)
               </label>
               <input
@@ -352,12 +373,12 @@ export const SchoolModal: React.FC<SchoolModalProps> = ({
                 value={phone}
                 onChange={e => setPhone(e.target.value)}
                 placeholder="e.g. 011-23456789"
-                className="w-full h-9 px-3 rounded-xl border border-[#E5E5E7] text-xs font-medium focus:outline-none focus:border-[#1D1D1F]"
+                className="w-full h-9 px-3 rounded-xl border border-[#E5E5E7] dark:border-zinc-800 text-xs font-medium focus:outline-none focus:border-[#1D1D1F] bg-white dark:bg-zinc-900 text-zinc-950 dark:text-white"
               />
             </div>
 
             <div>
-              <label className="text-xs font-medium text-[#515154] block mb-1">
+              <label className="text-xs font-medium text-[#515154] dark:text-zinc-300 block mb-1">
                 Campus / Address (Optional)
               </label>
               <input
@@ -365,17 +386,17 @@ export const SchoolModal: React.FC<SchoolModalProps> = ({
                 value={address}
                 onChange={e => setAddress(e.target.value)}
                 placeholder="e.g. Sector 14, Main Road"
-                className="w-full h-9 px-3 rounded-xl border border-[#E5E5E7] text-xs font-medium focus:outline-none focus:border-[#1D1D1F]"
+                className="w-full h-9 px-3 rounded-xl border border-[#E5E5E7] dark:border-zinc-800 text-xs font-medium focus:outline-none focus:border-[#1D1D1F] bg-white dark:bg-zinc-900 text-zinc-950 dark:text-white"
               />
             </div>
           </div>
 
           {/* Active Status Toggle */}
-          <div className="p-3 rounded-xl border border-[#E5E5E7] bg-[#F5F5F7] flex items-center justify-between">
+          <div className="p-3 rounded-xl border border-[#E5E5E7] dark:border-zinc-800 bg-[#F5F5F7] dark:bg-zinc-900 flex items-center justify-between">
             <div>
-              <div className="text-xs font-bold text-[#1D1D1F]">Active on POS Counter</div>
-              <div className="text-[11px] text-[#86868B]">
-                Inactive schools are hidden from quick billing chips but preserved in history
+              <div className="text-xs font-bold text-[#1D1D1F] dark:text-zinc-100">Active on POS Counter</div>
+              <div className="text-[11px] text-[#86868B] dark:text-zinc-400">
+                Inactive {catalogMeta.label.toLowerCase()} are hidden from quick billing chips but preserved in history
               </div>
             </div>
             <input
@@ -387,16 +408,16 @@ export const SchoolModal: React.FC<SchoolModalProps> = ({
           </div>
 
           {/* Action Buttons */}
-          <div className="pt-3 border-t border-[#E5E5E7] flex items-center justify-between gap-3">
+          <div className="pt-3 border-t border-[#E5E5E7] dark:border-zinc-800 flex items-center justify-between gap-3">
             {schoolToEdit ? (
               <button
                 type="button"
                 onClick={handleDelete}
                 disabled={isSaving}
-                className="px-3 py-2.5 rounded-xl bg-red-50 text-red-700 font-semibold text-xs hover:bg-red-100 flex items-center gap-1.5 transition-colors cursor-pointer"
+                className="px-3 py-2.5 rounded-xl bg-red-50 dark:bg-red-950/30 text-red-700 dark:text-red-400 font-semibold text-xs hover:bg-red-100 dark:hover:bg-red-950/50 flex items-center gap-1.5 transition-colors cursor-pointer"
               >
                 <Trash2 className="w-3.5 h-3.5" />
-                <span>Delete</span>
+                <span>{confirmDelete ? 'Confirm Delete?' : 'Delete'}</span>
               </button>
             ) : <div />}
 
@@ -404,17 +425,17 @@ export const SchoolModal: React.FC<SchoolModalProps> = ({
               <button
                 type="button"
                 onClick={onClose}
-                className="px-4 py-2.5 rounded-xl border border-[#E5E5E7] text-xs font-semibold text-[#86868B] hover:bg-[#F5F5F7] cursor-pointer"
+                className="px-4 py-2.5 rounded-xl border border-[#E5E5E7] dark:border-zinc-800 text-xs font-semibold text-[#86868B] dark:text-zinc-400 hover:bg-[#F5F5F7] dark:hover:bg-zinc-800 cursor-pointer"
               >
                 Cancel
               </button>
               <button
                 type="submit"
                 disabled={isSaving}
-                className="px-5 py-2.5 rounded-xl bg-[#1D1D1F] text-white text-xs font-semibold hover:bg-[#333336] shadow-xs flex items-center gap-1.5 transition-all cursor-pointer"
+                className="px-5 py-2.5 rounded-xl bg-[#1D1D1F] dark:bg-zinc-100 text-white dark:text-zinc-900 text-xs font-semibold hover:bg-[#333336] dark:hover:bg-white shadow-xs flex items-center gap-1.5 transition-all cursor-pointer"
               >
                 <Check className="w-4 h-4" />
-                <span>{isSaving ? 'Saving...' : schoolToEdit ? 'Save Changes' : 'Create School'}</span>
+                <span>{isSaving ? 'Saving...' : schoolToEdit ? 'Save Changes' : `Create ${catalogMeta.entityName}`}</span>
               </button>
             </div>
           </div>

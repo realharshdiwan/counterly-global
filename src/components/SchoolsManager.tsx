@@ -146,47 +146,47 @@ export const SchoolsManager: React.FC<SchoolsManagerProps> = ({
 
         {/* Stats Row */}
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 mt-4">
-          <div className="p-3 rounded-xl bg-[#F5F5F7] border border-[#E5E5E7]">
-            <div className="text-[10px] uppercase font-bold text-[#86868B]">Total Schools</div>
-            <div className="text-xl font-bold text-[#1D1D1F] mt-0.5">
-              {schools.length} Schools
+          <div className="p-3 rounded-xl bg-[#F5F5F7] border border-[#E5E5E7] dark:bg-zinc-800 dark:border-zinc-700">
+            <div className="text-[10px] uppercase font-bold text-[#86868B] dark:text-zinc-400">Total {catalogMeta.label}</div>
+            <div className="text-xl font-bold text-[#1D1D1F] dark:text-zinc-100 mt-0.5">
+              {schools.length} {catalogMeta.label}
             </div>
           </div>
 
-          <div className="p-3 rounded-xl bg-[#F5F5F7] border border-[#E5E5E7]">
-            <div className="text-[10px] uppercase font-bold text-[#86868B]">Active on Counter</div>
-            <div className="text-xl font-bold text-[#1D1D1F] mt-0.5">
+          <div className="p-3 rounded-xl bg-[#F5F5F7] border border-[#E5E5E7] dark:bg-zinc-800 dark:border-zinc-700">
+            <div className="text-[10px] uppercase font-bold text-[#86868B] dark:text-zinc-400">Active on Counter</div>
+            <div className="text-xl font-bold text-[#1D1D1F] dark:text-zinc-100 mt-0.5">
               {schools.filter(s => s.active !== false).length} Active
             </div>
           </div>
 
-          <div className="p-3 rounded-xl bg-[#F5F5F7] border border-[#E5E5E7] col-span-2 sm:col-span-1">
-            <div className="text-[10px] uppercase font-bold text-[#86868B]">Price Book Multipliers</div>
-            <div className="text-sm font-bold text-[#1D1D1F] mt-1">
+          <div className="p-3 rounded-xl bg-[#F5F5F7] border border-[#E5E5E7] dark:bg-zinc-800 dark:border-zinc-700 col-span-2 sm:col-span-1">
+            <div className="text-[10px] uppercase font-bold text-[#86868B] dark:text-zinc-400">Price Book Multipliers</div>
+            <div className="text-sm font-bold text-[#1D1D1F] dark:text-zinc-100 mt-1">
               Custom Rates Enabled
             </div>
           </div>
         </div>
 
         {/* Filters */}
-        <div className="mt-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-3 border-t border-[#E5E5E7]">
+        <div className="mt-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-3 border-t border-[#E5E5E7] dark:border-zinc-800">
           <div className="flex items-center gap-2">
             <button
               onClick={() => setFilterActiveOnly(false)}
               className={`px-3 py-1.5 rounded-xl text-xs font-semibold border transition-colors cursor-pointer ${
                 !filterActiveOnly
-                  ? 'bg-[#1D1D1F] text-white border-[#1D1D1F]'
-                  : 'bg-[#F5F5F7] text-[#515154] border-[#E5E5E7]'
+                  ? 'bg-[#1D1D1F] dark:bg-zinc-100 text-white dark:text-zinc-900 border-transparent shadow-xs'
+                  : 'bg-[#F5F5F7] dark:bg-zinc-800 text-[#515154] dark:text-zinc-400 border-[#E5E5E7] dark:border-zinc-700'
               }`}
             >
-              All Schools ({schools.length})
+              All {catalogMeta.label} ({schools.length})
             </button>
             <button
               onClick={() => setFilterActiveOnly(true)}
               className={`px-3 py-1.5 rounded-xl text-xs font-semibold border transition-colors cursor-pointer ${
                 filterActiveOnly
-                  ? 'bg-[#1D1D1F] text-white border-[#1D1D1F]'
-                  : 'bg-[#F5F5F7] text-[#515154] border-[#E5E5E7]'
+                  ? 'bg-[#1D1D1F] dark:bg-zinc-100 text-white dark:text-zinc-900 border-transparent shadow-xs'
+                  : 'bg-[#F5F5F7] dark:bg-zinc-800 text-[#515154] dark:text-zinc-400 border-[#E5E5E7] dark:border-zinc-700'
               }`}
             >
               Active Only
@@ -199,14 +199,14 @@ export const SchoolsManager: React.FC<SchoolsManagerProps> = ({
               type="text"
               value={searchQuery}
               onChange={e => setSearchQuery(e.target.value)}
-              placeholder="Search school name or code..."
-              className="w-full h-8 pl-8 pr-3 rounded-xl border border-[#E5E5E7] text-xs font-medium focus:outline-none focus:border-[#1D1D1F]"
+              placeholder={catalogMeta.searchPlaceholder}
+              className="w-full h-8 pl-8 pr-3 rounded-xl border border-[#E5E5E7] dark:border-zinc-700 text-xs font-medium focus:outline-none focus:border-[#1D1D1F] bg-white dark:bg-zinc-800 text-zinc-950 dark:text-white"
             />
           </div>
         </div>
       </div>
 
-      {/* SCHOOLS CARDS GRID */}
+      {/* ACCOUNTS CARDS GRID */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
         {filteredSchools.map(sch => {
           const mappedPrices = priceCounts.get(sch.id) || 0;
@@ -215,20 +215,22 @@ export const SchoolsManager: React.FC<SchoolsManagerProps> = ({
           return (
             <div
               key={sch.id}
-              className={`bg-white rounded-2xl border p-4 shadow-xs flex flex-col justify-between transition-all ${
+              className={`bg-white dark:bg-zinc-900 rounded-2xl border p-4 shadow-xs flex flex-col justify-between transition-all ${
                 sch.active !== false
-                  ? 'border-[#E5E5E7] hover:border-[#D2D2D7]'
-                  : 'border-[#E5E5E7] bg-slate-50/70 opacity-75'
+                  ? 'border-[#E5E5E7] dark:border-zinc-800 hover:border-[#D2D2D7] dark:hover:border-zinc-700'
+                  : 'border-[#E5E5E7] dark:border-zinc-800 bg-slate-50/70 dark:bg-zinc-900/50 opacity-75'
               }`}
             >
               <div>
                 <div className="flex items-start justify-between gap-2 mb-2">
                   <div className="flex items-center gap-2">
-                    <span className="px-2 py-1 rounded-lg bg-[#F5F5F7] text-[#1D1D1F] font-bold text-xs border border-[#E5E5E7]">
+                    <span className="px-2 py-1 rounded-lg bg-[#F5F5F7] dark:bg-zinc-800 text-[#1D1D1F] dark:text-zinc-100 font-bold text-xs border border-[#E5E5E7] dark:border-zinc-700">
                       {sch.code}
                     </span>
-                    <span className={`text-[11px] font-medium px-2 py-0.5 rounded-full ${
-                      sch.active !== false ? 'bg-[#F5F5F7] text-[#1D1D1F] border border-[#E5E5E7]' : 'bg-slate-200 text-slate-600'
+                    <span className={`text-[11px] font-medium px-2 py-0.5 rounded-md ${
+                      sch.active !== false
+                        ? 'bg-[#F5F5F7] dark:bg-zinc-800 text-[#1D1D1F] dark:text-zinc-200 border border-[#E5E5E7] dark:border-zinc-700'
+                        : 'bg-zinc-200 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400'
                     }`}>
                       {sch.active !== false ? 'Active' : 'Inactive'}
                     </span>
@@ -239,25 +241,25 @@ export const SchoolsManager: React.FC<SchoolsManagerProps> = ({
                       setSchoolToEdit(sch);
                       setIsModalOpen(true);
                     }}
-                    className="p-1.5 text-[#86868B] hover:text-[#1D1D1F] rounded-lg hover:bg-[#F5F5F7] transition-colors cursor-pointer"
-                    title="Edit school details"
+                    className="p-1.5 text-[#86868B] hover:text-[#1D1D1F] dark:hover:text-white rounded-lg hover:bg-[#F5F5F7] dark:hover:bg-zinc-800 transition-colors cursor-pointer"
+                    title="Edit account details"
                   >
                     <Edit3 className="w-3.5 h-3.5" />
                   </button>
                 </div>
 
-                <h3 className="font-bold text-sm sm:text-base text-[#1D1D1F] line-clamp-2">
+                <h3 className="font-bold text-sm sm:text-base text-[#1D1D1F] dark:text-zinc-100 line-clamp-2">
                   {sch.name}
                 </h3>
 
-                <div className="mt-3 space-y-1.5 text-xs text-[#515154]">
+                <div className="mt-3 space-y-1.5 text-xs text-[#515154] dark:text-zinc-400">
                   <div className="flex items-center justify-between">
                     <span>Pricing Multiplier:</span>
-                    <strong className="text-[#1D1D1F]">{mult}x ({Math.round((mult - 1) * 100)}%)</strong>
+                    <strong className="text-[#1D1D1F] dark:text-zinc-100">{mult}x ({Math.round((mult - 1) * 100)}%)</strong>
                   </div>
                   <div className="flex items-center justify-between">
                     <span>Mapped Price SKUs:</span>
-                    <strong className="text-[#1D1D1F]">{mappedPrices} rates</strong>
+                    <strong className="text-[#1D1D1F] dark:text-zinc-100">{mappedPrices} rates</strong>
                   </div>
                   {sch.phone && (
                     <div className="flex items-center gap-1 text-[11px]">
@@ -275,10 +277,10 @@ export const SchoolsManager: React.FC<SchoolsManagerProps> = ({
               </div>
 
               {/* Action Buttons Footer */}
-              <div className="mt-4 pt-3 border-t border-[#E5E5E7] flex items-center justify-between gap-2">
+              <div className="mt-4 pt-3 border-t border-[#E5E5E7] dark:border-zinc-800 flex items-center justify-between gap-2">
                 <button
                   onClick={() => handleToggleActive(sch)}
-                  className="text-[11px] font-medium text-[#86868B] hover:text-[#1D1D1F] cursor-pointer"
+                  className="text-[11px] font-medium text-[#86868B] hover:text-[#1D1D1F] dark:hover:text-zinc-200 cursor-pointer"
                 >
                   {sch.active !== false ? 'Set Inactive' : 'Set Active'}
                 </button>
@@ -287,8 +289,8 @@ export const SchoolsManager: React.FC<SchoolsManagerProps> = ({
                   {onViewSchoolPrices && (
                     <button
                       onClick={() => onViewSchoolPrices(sch.id)}
-                      className="px-2.5 py-1 rounded-lg bg-[#F5F5F7] hover:bg-[#E8E8ED] text-[#1D1D1F] text-xs font-semibold transition-colors cursor-pointer"
-                      title="View & Edit Price Matrix for this school"
+                      className="px-2.5 py-1 rounded-lg bg-[#F5F5F7] dark:bg-zinc-800 hover:bg-[#E8E8ED] dark:hover:bg-zinc-700 text-[#1D1D1F] dark:text-zinc-100 text-xs font-semibold transition-colors cursor-pointer"
+                      title="View & Edit Price Matrix for this account"
                     >
                       Rate Card
                     </button>
@@ -297,9 +299,9 @@ export const SchoolsManager: React.FC<SchoolsManagerProps> = ({
                   {onSelectSchoolForBilling && sch.active !== false && (
                     <button
                       onClick={() => onSelectSchoolForBilling(sch)}
-                      className="px-2.5 py-1 rounded-lg bg-[#1D1D1F] hover:bg-[#333336] text-white text-xs font-semibold transition-colors flex items-center gap-1 cursor-pointer"
+                      className="px-2.5 py-1 rounded-lg bg-[#1D1D1F] dark:bg-zinc-100 hover:bg-[#333336] dark:hover:bg-white text-white dark:text-zinc-900 text-xs font-semibold transition-colors flex items-center gap-1 cursor-pointer"
                     >
-                      <ArrowRight className="w-3 h-3 text-white" />
+                      <ArrowRight className="w-3 h-3" />
                       <span>Bill</span>
                     </button>
                   )}
@@ -311,17 +313,17 @@ export const SchoolsManager: React.FC<SchoolsManagerProps> = ({
       </div>
 
       {filteredSchools.length === 0 && (
-        <div className="py-12 text-center bg-white rounded-2xl border border-[#E5E5E7] mt-4">
-          <SchoolIcon className="w-8 h-8 text-slate-300 mx-auto mb-2" />
-          <p className="text-sm font-bold text-[#1D1D1F]">No schools match your search</p>
+        <div className="py-12 text-center bg-white dark:bg-zinc-900 rounded-2xl border border-[#E5E5E7] dark:border-zinc-800 mt-4">
+          <CatalogIcon className="w-8 h-8 text-slate-300 dark:text-zinc-700 mx-auto mb-2" />
+          <p className="text-sm font-bold text-[#1D1D1F] dark:text-zinc-200">No {catalogMeta.label.toLowerCase()} match your search</p>
           <button
             onClick={() => {
               setSchoolToEdit(null);
               setIsModalOpen(true);
             }}
-            className="mt-3 px-4 py-2 bg-[#1D1D1F] text-white rounded-xl text-xs font-semibold hover:bg-[#333336] transition-colors cursor-pointer"
+            className="mt-3 px-4 py-2 bg-[#1D1D1F] dark:bg-zinc-100 text-white dark:text-zinc-900 rounded-xl text-xs font-semibold hover:bg-[#333336] dark:hover:bg-white transition-colors cursor-pointer"
           >
-            + Add New School
+            + Add New {catalogMeta.entityName}
           </button>
         </div>
       )}
@@ -336,7 +338,7 @@ export const SchoolsManager: React.FC<SchoolsManagerProps> = ({
         schoolToEdit={schoolToEdit}
         onSchoolSaved={() => {
           loadSchools();
-          showToast(schoolToEdit ? 'School updated' : 'New school added!');
+          showToast(schoolToEdit ? `${catalogMeta.entityName} updated` : `New ${catalogMeta.entityName} added!`);
         }}
       />
 
@@ -347,7 +349,7 @@ export const SchoolsManager: React.FC<SchoolsManagerProps> = ({
         schools={schools}
         onGenerated={async () => {
           await loadSchools();
-          showToast('1-Click Uniform Catalog generated!');
+          showToast(`1-Click ${catalogMeta.label} Catalog generated!`);
         }}
       />
     </div>

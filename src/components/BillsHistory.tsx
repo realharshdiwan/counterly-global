@@ -1,47 +1,53 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { 
-  ReceiptText, 
-  Search, 
-  Printer, 
-  CheckCircle2, 
-  XCircle, 
-  Download, 
-  Phone, 
-  Calendar, 
-  RotateCcw, 
-  AlertCircle,
-  ShieldAlert,
-  UserCheck,
+import {
+  ReceiptText,
+  Search,
+  XCircle,
+  Download,
   X,
   FileSpreadsheet,
-  ArrowRightLeft
+  ArrowRightLeft,
+  TrendingUp,
+  Users,
 } from 'lucide-react';
 import { db } from '../db/db';
-import { type Bill, type ProductStock, type ShopConfig } from '../types';
+import { type Bill, type ShopConfig, type CustomerProfile } from '../types';
+import {
+  formatDateShort,
+  formatMoney,
+  formatTimeShort,
+  getCurrencyCode,
+  getPaymentMethodLabel,
+} from '../lib/locale';
 import { useAuth } from '../context/AuthContext';
 import { ManagerOverrideModal } from './ManagerOverrideModal';
 import { DayCloseReportModal } from './DayCloseReportModal';
 import { ExchangeReturnModal } from './ExchangeReturnModal';
 import { GstCompositionReportModal } from './GstCompositionReportModal';
+import { RetailAnalyticsView } from './RetailAnalyticsView';
+import { CustomerCrmView } from './CustomerCrmView';
 
 interface BillsHistoryProps {
   onOpenReceipt: (bill: Bill) => void;
+  onNavigateToRegister?: (customer?: CustomerProfile) => void;
 }
 
-export const BillsHistory: React.FC<BillsHistoryProps> = ({ onOpenReceipt }) => {
+export const BillsHistory: React.FC<BillsHistoryProps> = ({
+  onOpenReceipt,
+  onNavigateToRegister,
+}) => {
   const { currentUser, canVoidBills } = useAuth();
+  const [subView, setSubView] = useState<'ledger' | 'analytics' | 'customers'>('ledger');
   const [bills, setBills] = useState<Bill[]>([]);
   const [shopConfig, setShopConfig] = useState<ShopConfig | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedFilter, setSelectedFilter] = useState<'all' | 'unpaid' | 'voided'>('all');
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
-  // In-App Void Confirmation Modal & Manager Override
   const [billToVoid, setBillToVoid] = useState<Bill | null>(null);
   const [isVoidModalOpen, setIsVoidModalOpen] = useState(false);
   const [isManagerOverrideOpen, setIsManagerOverrideOpen] = useState(false);
 
-  // Day Close & Exchange modals
   const [isDayCloseOpen, setIsDayCloseOpen] = useState(false);
   const [isExchangeOpen, setIsExchangeOpen] = useState(false);
   const [isGstModalOpen, setIsGstModalOpen] = useState(false);
@@ -59,9 +65,7 @@ export const BillsHistory: React.FC<BillsHistoryProps> = ({ onOpenReceipt }) => 
         db.shop_config.toArray(),
       ]);
       setBills(allBills);
-      if (configs.length > 0) {
-        setShopConfig(configs[0]);
-      }
+      if (configs.length > 0) setShopConfig(configs[0]);
     } catch (err) {
       console.error('Failed to load bills:', err);
     }
@@ -71,20 +75,19 @@ export const BillsHistory: React.FC<BillsHistoryProps> = ({ onOpenReceipt }) => 
     loadBills();
   }, []);
 
-  // Filtered bills
   const filteredBills = useMemo(() => {
     return bills.filter(b => {
-      if (selectedFilter === 'unpaid' && b.is_paid) return false;
+      if (selectedFilter === 'unpaid' && (b.is_paid || b.status === 'voided')) return false;
       if (selectedFilter === 'voided' && b.status !== 'voided') return false;
       if (selectedFilter === 'all' && b.status === 'voided') return false;
 
-      if (searchQuery) {
-        const q = searchQuery.toLowerCase();
+      if (searchQuery.trim()) {
+        const q = searchQuery.trim().toLowerCase();
         return (
           b.bill_number.toLowerCase().includes(q) ||
           (b.customer_name && b.customer_name.toLowerCase().includes(q)) ||
           (b.customer_phone && b.customer_phone.includes(q)) ||
-          b.school_name.toLowerCase().includes(q) ||
+          (b.school_name && b.school_name.toLowerCase().includes(q)) ||
           (b.billed_by_name && b.billed_by_name.toLowerCase().includes(q))
         );
       }
@@ -92,407 +95,448 @@ export const BillsHistory: React.FC<BillsHistoryProps> = ({ onOpenReceipt }) => 
     });
   }, [bills, selectedFilter, searchQuery]);
 
-  // Summary Metrics
   const metrics = useMemo(() => {
     const active = bills.filter(b => b.status !== 'voided');
-    const totalRev = active.reduce((acc, b) => acc + (b.total || 0), 0);
+    const totalRev = active.reduce(
+      (acc, b) => acc + Math.max(0, (b.total || 0) - (b.refunded_amount || 0)),
+      0
+    );
     const unpaidCredit = active
       .filter(b => !b.is_paid)
-      .reduce((acc, b) => acc + (b.total || 0), 0);
-    const totalBills = active.length;
-
-    return { totalRev, unpaidCredit, totalBills };
+      .reduce((acc, b) => acc + Math.max(0, (b.total || 0) - (b.refunded_amount || 0)), 0);
+    return { totalRev, unpaidCredit, totalBills: active.length };
   }, [bills]);
 
-  // Settle Credit Bill (Mark Paid)
   const handleSettleCredit = async (bill: Bill) => {
     try {
-      const nowIso = new Date().toISOString();
       await db.bills.update(bill.id, {
         is_paid: true,
-        paid_at: nowIso,
+        paid_at: new Date().toISOString(),
       });
       await loadBills();
-      showToast(`Bill ${bill.bill_number} marked as Paid!`);
-    } catch (err) {
-      console.error('Error settling bill:', err);
-      showToast('Error updating payment status');
+      showToast(`Invoice ${bill.bill_number} marked as paid`);
+    } catch {
+      showToast('Failed to update payment status');
     }
   };
 
-  // Initiate Void Flow
   const handleInitiateVoid = (bill: Bill) => {
     setBillToVoid(bill);
     if (!canVoidBills()) {
-      // Cashier role: prompt manager authorization PIN first
       setIsManagerOverrideOpen(true);
     } else {
       setIsVoidModalOpen(true);
     }
   };
 
-  // Execute Void Bill with stock restoration (No window.confirm)
   const executeVoidBill = async () => {
     if (!billToVoid) return;
-
     try {
       const nowIso = new Date().toISOString();
       await db.bills.update(billToVoid.id, {
         status: 'voided',
         voided_at: nowIso,
-        void_reason: `Voided at counter by ${currentUser?.name || 'Staff'}`,
+        void_reason: `Voided by ${currentUser?.name || 'Staff'}`,
       });
 
-      // Restore stock for all items
       for (const item of billToVoid.items) {
-        const stockKey = `${item.product_id}_${item.size_id || 'free'}`;
-        const existingStock = await db.stocks.get(stockKey);
-        const currentQty = existingStock ? existingStock.quantity : 0;
-        const newQty = currentQty + item.qty;
-
-        if (existingStock) {
-          await db.stocks.update(existingStock.id, { quantity: newQty });
+        if (item.variant_id) {
+          const variant = await db.variants.get(item.variant_id);
+          if (variant) {
+            const prevQty = variant.stock_qty;
+            const nextQty = prevQty + item.qty;
+            await db.variants.update(variant.id, { stock_qty: nextQty });
+            await db.inventory_movements.add({
+              id: `mov_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+              product_id: item.product_id,
+              variant_id: variant.id,
+              product_name: item.product_name,
+              size_label: [item.size_label, item.color_label].filter(Boolean).join(' · ') || 'Standard',
+              type: 'return',
+              qty: item.qty,
+              previous_stock: prevQty,
+              new_stock: nextQty,
+              notes: `Voided invoice ${billToVoid.bill_number}`,
+              created_at: nowIso,
+              reference_bill_id: billToVoid.id,
+            });
+          }
         }
-
-        await db.inventory_movements.add({
-          id: `mov_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
-          product_id: item.product_id,
-          product_name: item.product_name,
-          size_label: item.size_label || 'Free',
-          type: 'return',
-          qty: item.qty,
-          previous_stock: currentQty,
-          new_stock: newQty,
-          notes: `Stock restored from Voided Bill ${billToVoid.bill_number}`,
-          created_at: nowIso,
-          reference_bill_id: billToVoid.id,
-        });
       }
 
       await loadBills();
       setIsVoidModalOpen(false);
       setBillToVoid(null);
-      showToast(`Bill ${billToVoid.bill_number} voided & stock restored`);
-    } catch (err) {
-      console.error('Error voiding bill:', err);
-      showToast('Error voiding bill');
+      showToast(`Invoice ${billToVoid.bill_number} voided and stock restored`);
+    } catch {
+      showToast('Error voiding invoice');
     }
   };
 
-  // Export Sales to CSV
   const handleExportCSV = () => {
     if (bills.length === 0) {
-      showToast('No bills to export');
+      showToast('No invoices to export');
       return;
     }
 
-    const headers = ['Bill Number', 'Date', 'School', 'Customer', 'Phone', 'Total (INR)', 'Payment Mode', 'Billed By', 'Status'];
+    const currCode = getCurrencyCode(shopConfig);
+    const headers = [
+      'Invoice Number',
+      'Date',
+      'Customer',
+      'Phone',
+      `Net Total (${currCode})`,
+      `Refunded (${currCode})`,
+      'Payment Method',
+      'Staff',
+      'Status',
+    ];
     const rows = bills.map(b => [
       b.bill_number,
-      new Date(b.created_at).toLocaleString('en-IN'),
-      `"${b.school_name || ''}"`,
-      `"${b.customer_name || ''}"`,
+      `${formatDateShort(b.created_at, shopConfig)} ${formatTimeShort(b.created_at, shopConfig)}`,
+      `"${(b.customer_name || 'Walk-in').replace(/"/g, '""')}"`,
       b.customer_phone || '',
-      b.total,
-      b.payment_method,
-      `"${b.billed_by_name || ''}"`,
-      b.status === 'voided' ? 'VOIDED' : b.is_paid ? 'PAID' : 'PENDING',
+      Math.max(0, (b.total || 0) - (b.refunded_amount || 0)),
+      b.refunded_amount || 0,
+      getPaymentMethodLabel(b.payment_method, shopConfig),
+      `"${(b.billed_by_name || '').replace(/"/g, '""')}"`,
+      b.status === 'voided'
+        ? 'VOIDED'
+        : (b.refunded_amount || 0) > 0
+        ? 'PARTIAL/REFUNDED'
+        : b.is_paid
+        ? 'PAID'
+        : 'CREDIT DUE',
     ]);
 
-    const csvContent = 'data:text/csv;charset=utf-8,' + [headers.join(','), ...rows.map(e => e.join(','))].join('\n');
-    const encodedUri = encodeURI(csvContent);
+    const csvContent = [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
-    link.setAttribute('href', encodedUri);
-    link.setAttribute('download', `Nandalaya_Bills_${new Date().toISOString().slice(0, 10)}.csv`);
+    link.href = url;
+    link.download = `SikkaDesk_Invoices_${new Date().toISOString().slice(0, 10)}.csv`;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
-    showToast('Sales CSV exported!');
+    URL.revokeObjectURL(url);
+    showToast('Invoices CSV exported');
   };
 
+  const showGstReport = shopConfig?.tax_label === 'GST';
+  const canViewMargins = currentUser?.role === 'admin' || currentUser?.role === 'manager';
+
   return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6">
+    <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6 space-y-5">
       {toastMessage && (
-        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 bg-[#1D1D1F] text-white px-5 py-2 rounded-xl shadow-lg border border-[#333336] font-semibold text-xs animate-bounce">
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 bg-zinc-950 dark:bg-zinc-100 text-white dark:text-zinc-950 px-4 py-2 rounded-lg shadow-lg text-xs font-semibold">
           {toastMessage}
         </div>
       )}
 
-      {/* Top Header & Metrics Card */}
-      <div className="bg-white rounded-2xl border border-[#E5E5E7] p-5 shadow-xs mb-6">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-[#E5E5E7]">
-          <div>
-            <div className="flex items-center gap-2">
-              <ReceiptText className="w-5 h-5 text-[#1D1D1F]" />
-              <h1 className="font-bold text-xl text-[#1D1D1F]">Sales &amp; Invoices Register</h1>
-            </div>
-            <p className="text-xs text-[#86868B] mt-0.5">
-              Review transaction history, reprint thermal slips, WhatsApp receipts, and settle credit bills
-            </p>
-          </div>
+      {/* Segmented Workspace Switcher */}
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-center gap-1 p-1 rounded-xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800">
+          <button
+            type="button"
+            onClick={() => setSubView('ledger')}
+            className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-semibold cursor-pointer transition-colors whitespace-nowrap ${
+              subView === 'ledger'
+                ? 'bg-zinc-950 dark:bg-zinc-100 text-white dark:text-zinc-950'
+                : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-950 dark:hover:text-white'
+            }`}
+          >
+            <ReceiptText className="w-3.5 h-3.5" />
+            <span>Invoice Ledger</span>
+          </button>
 
-          <div className="flex flex-wrap items-center gap-2">
-            {/* DAY-CLOSE Z-REPORT BUTTON */}
+          {canViewMargins && (
             <button
-              onClick={() => setIsDayCloseOpen(true)}
-              className="flex items-center gap-1.5 px-3.5 py-2 bg-[#1D1D1F] text-white rounded-xl text-xs font-semibold hover:bg-black transition-all shadow-xs cursor-pointer"
-              title="Generate Day-Close Z-Report & Cash Drawer Tally"
+              type="button"
+              onClick={() => setSubView('analytics')}
+              className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-semibold cursor-pointer transition-colors whitespace-nowrap ${
+                subView === 'analytics'
+                  ? 'bg-zinc-950 dark:bg-zinc-100 text-white dark:text-zinc-950'
+                  : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-950 dark:hover:text-white'
+              }`}
+            >
+              <TrendingUp className="w-3.5 h-3.5" />
+              <span>Analytics &amp; Margins</span>
+            </button>
+          )}
+
+          <button
+            type="button"
+            onClick={() => setSubView('customers')}
+            className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-semibold cursor-pointer transition-colors whitespace-nowrap ${
+              subView === 'customers'
+                ? 'bg-zinc-950 dark:bg-zinc-100 text-white dark:text-zinc-950'
+                : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-950 dark:hover:text-white'
+            }`}
+          >
+            <Users className="w-3.5 h-3.5" />
+            <span>Customers &amp; Credit</span>
+          </button>
+        </div>
+      </div>
+
+      {subView === 'analytics' && canViewMargins ? (
+        <RetailAnalyticsView
+          onNavigateToRegister={onNavigateToRegister ? () => onNavigateToRegister() : undefined}
+        />
+      ) : subView === 'customers' ? (
+        <CustomerCrmView
+          onOpenReceipt={onOpenReceipt}
+          onBillCustomer={onNavigateToRegister}
+        />
+      ) : (
+        <>
+          {/* Top Header & KPI Strip */}
+          <div className="bg-white dark:bg-zinc-900 rounded-2xl border border-zinc-200 dark:border-zinc-800 p-5 space-y-5">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-zinc-200 dark:border-zinc-800">
+              <div>
+                <div className="flex items-center gap-2">
+                  <ReceiptText className="w-5 h-5 text-zinc-950 dark:text-zinc-50" />
+                  <h1 className="font-bold text-lg text-zinc-950 dark:text-zinc-50 tracking-tight">
+                    Invoices &amp; Sales History
+                  </h1>
+                </div>
+                <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">
+                  Review receipts, process exchanges, settle store credit, and run Day-Close Z-Reports
+                </p>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setIsDayCloseOpen(true)}
+              className="flex items-center gap-1.5 px-3.5 py-2 bg-zinc-950 dark:bg-zinc-100 text-white dark:text-zinc-950 rounded-lg text-xs font-semibold hover:opacity-90 cursor-pointer whitespace-nowrap"
             >
               <FileSpreadsheet className="w-3.5 h-3.5" />
-              <span>Day-Close (Z-Report)</span>
+              <span>Day-Close Z-Report</span>
             </button>
 
-            {/* GST RETURN / SALES SUMMARY HELPER */}
-            <button
-              onClick={() => setIsGstModalOpen(true)}
-              className="flex items-center gap-1.5 px-3.5 py-2 bg-[#F5F5F7] text-[#1D1D1F] border border-[#E5E5E7] rounded-xl text-xs font-semibold hover:bg-[#E5E5E7] transition-all shadow-2xs cursor-pointer"
-              title={
-                shopConfig?.gst_scheme === 'regular'
-                  ? 'GSTR-1 & GSTR-3B Sales & Tax Return Helper'
-                  : shopConfig?.gst_scheme === 'none'
-                  ? 'Periodic Sales & Turnover Summary'
-                  : 'GST CMP-08 Quarterly Composition Statement'
-              }
-            >
-              <FileSpreadsheet className="w-3.5 h-3.5 text-[#1D1D1F]" />
-              <span>
-                {shopConfig?.gst_scheme === 'regular'
-                  ? 'GST (GSTR)'
-                  : shopConfig?.gst_scheme === 'none'
-                  ? 'Sales Summary'
-                  : 'GST (CMP-08)'}
-              </span>
-            </button>
+            {showGstReport && (
+              <button
+                type="button"
+                onClick={() => setIsGstModalOpen(true)}
+                className="flex items-center gap-1.5 px-3 py-2 border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 text-xs font-semibold rounded-lg hover:bg-zinc-50 dark:hover:bg-zinc-800 cursor-pointer whitespace-nowrap"
+              >
+                <FileSpreadsheet className="w-3.5 h-3.5" />
+                <span>GST Report</span>
+              </button>
+            )}
 
-            {/* SIZE EXCHANGE DESK */}
             <button
+              type="button"
               onClick={() => {
                 setExchangeBillTarget(null);
                 setIsExchangeOpen(true);
               }}
-              className="flex items-center gap-1.5 px-3.5 py-2 bg-[#F5F5F7] text-[#1D1D1F] border border-[#E5E5E7] rounded-xl text-xs font-semibold hover:bg-[#E5E5E7] transition-all shadow-2xs cursor-pointer"
-              title="Process garment size exchange & stock swap"
+              className="flex items-center gap-1.5 px-3 py-2 border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 text-xs font-semibold rounded-lg hover:bg-zinc-50 dark:hover:bg-zinc-800 cursor-pointer whitespace-nowrap"
             >
-              <ArrowRightLeft className="w-3.5 h-3.5 text-[#1D1D1F]" />
-              <span>Size Exchange</span>
+              <ArrowRightLeft className="w-3.5 h-3.5" />
+              <span>Returns</span>
             </button>
 
             <button
+              type="button"
               onClick={handleExportCSV}
-              className="flex items-center gap-1.5 px-3.5 py-2 bg-[#F5F5F7] text-[#1D1D1F] border border-[#E5E5E7] rounded-xl text-xs font-semibold hover:bg-[#E5E5E7] transition-colors cursor-pointer"
+              className="flex items-center gap-1.5 px-3 py-2 border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 text-xs font-semibold rounded-lg hover:bg-zinc-50 dark:hover:bg-zinc-800 cursor-pointer whitespace-nowrap"
             >
-              <Download className="w-3.5 h-3.5 text-[#86868B]" />
+              <Download className="w-3.5 h-3.5 text-zinc-500" />
               <span>Export CSV</span>
             </button>
           </div>
         </div>
 
-        {/* Sales Metrics Cards */}
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-4">
-          <div className="p-3.5 rounded-xl bg-[#F5F5F7] border border-[#E5E5E7]">
-            <div className="text-[10px] uppercase font-semibold text-[#86868B]">Total Completed Revenue</div>
-            <div className="text-xl font-bold text-[#1D1D1F] mt-0.5">
-              ₹{metrics.totalRev.toLocaleString('en-IN')}
+        {/* KPI Cards */}
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <div className="p-3.5 rounded-xl bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800">
+            <div className="text-[11px] font-medium text-zinc-500">Completed Sales</div>
+            <div className="text-xl font-bold font-mono tabular-nums text-zinc-950 dark:text-zinc-50 mt-0.5">
+              {formatMoney(metrics.totalRev, shopConfig)}
             </div>
           </div>
 
-          <div className="p-3.5 rounded-xl bg-[#F5F5F7] border border-[#E5E5E7]">
-            <div className="text-[10px] uppercase font-semibold text-[#86868B]">Total Invoices Generated</div>
-            <div className="text-xl font-bold text-[#1D1D1F] mt-0.5">
-              {metrics.totalBills} Bills
+          <div className="p-3.5 rounded-xl bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800">
+            <div className="text-[11px] font-medium text-zinc-500">Invoices Issued</div>
+            <div className="text-xl font-bold font-mono tabular-nums text-zinc-950 dark:text-zinc-50 mt-0.5">
+              {metrics.totalBills}
             </div>
           </div>
 
-          <div className="p-3.5 rounded-xl bg-amber-50 border border-amber-200">
-            <div className="text-[10px] uppercase font-semibold text-amber-900">Pending Credit (Udhar)</div>
-            <div className="text-xl font-bold text-amber-800 mt-0.5">
-              ₹{metrics.unpaidCredit.toLocaleString('en-IN')}
+          <div className="p-3.5 rounded-xl bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800">
+            <div className="text-[11px] font-medium text-zinc-500">Credit / Balance Due</div>
+            <div className="text-xl font-bold font-mono tabular-nums text-amber-600 dark:text-amber-400 mt-0.5">
+              {formatMoney(metrics.unpaidCredit, shopConfig)}
             </div>
           </div>
         </div>
 
-        {/* Filter Tabs & Search Bar */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mt-5 pt-4 border-t border-[#E5E5E7]">
-          <div className="flex items-center gap-1.5 overflow-x-auto">
+        {/* Filter & Search Row */}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-2 border-t border-zinc-200 dark:border-zinc-800">
+          <div className="flex items-center gap-1 bg-zinc-100 dark:bg-zinc-950 p-1 rounded-lg border border-zinc-200 dark:border-zinc-800 w-fit">
             <button
+              type="button"
               onClick={() => setSelectedFilter('all')}
-              className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition-colors border cursor-pointer ${
+              className={`px-3 py-1.5 rounded-md text-xs font-semibold cursor-pointer ${
                 selectedFilter === 'all'
-                  ? 'bg-[#1D1D1F] text-white border-[#1D1D1F]'
-                  : 'bg-[#F5F5F7] text-[#86868B] border-[#E5E5E7] hover:text-[#1D1D1F]'
+                  ? 'bg-white dark:bg-zinc-800 text-zinc-950 dark:text-zinc-50 shadow-2xs'
+                  : 'text-zinc-500'
               }`}
             >
               Completed ({bills.filter(b => b.status !== 'voided').length})
             </button>
-
             <button
+              type="button"
               onClick={() => setSelectedFilter('unpaid')}
-              className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition-colors border cursor-pointer ${
+              className={`px-3 py-1.5 rounded-md text-xs font-semibold cursor-pointer ${
                 selectedFilter === 'unpaid'
-                  ? 'bg-amber-600 text-white border-amber-600'
-                  : 'bg-[#F5F5F7] text-amber-800 border-[#E5E5E7] hover:bg-amber-50'
+                  ? 'bg-white dark:bg-zinc-800 text-zinc-950 dark:text-zinc-50 shadow-2xs'
+                  : 'text-zinc-500'
               }`}
             >
-              Pending Credit ({bills.filter(b => !b.is_paid && b.status !== 'voided').length})
+              Credit Due ({bills.filter(b => !b.is_paid && b.status !== 'voided').length})
             </button>
-
             <button
+              type="button"
               onClick={() => setSelectedFilter('voided')}
-              className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition-colors border cursor-pointer ${
+              className={`px-3 py-1.5 rounded-md text-xs font-semibold cursor-pointer ${
                 selectedFilter === 'voided'
-                  ? 'bg-red-600 text-white border-red-600'
-                  : 'bg-[#F5F5F7] text-red-800 border-[#E5E5E7] hover:bg-red-50'
+                  ? 'bg-white dark:bg-zinc-800 text-zinc-950 dark:text-zinc-50 shadow-2xs'
+                  : 'text-zinc-500'
               }`}
             >
               Voided ({bills.filter(b => b.status === 'voided').length})
             </button>
           </div>
 
-          <div className="relative w-full sm:w-64">
-            <Search className="w-3.5 h-3.5 text-[#86868B] absolute left-3 top-1/2 -translate-y-1/2" />
+          <div className="relative w-full sm:w-72">
+            <Search className="w-3.5 h-3.5 text-zinc-400 absolute left-3 top-1/2 -translate-y-1/2" />
             <input
               type="text"
               value={searchQuery}
               onChange={e => setSearchQuery(e.target.value)}
-              placeholder="Search bill no, customer, cashier..."
-              className="w-full h-8 pl-8 pr-3 rounded-xl border border-[#E5E5E7] text-xs font-semibold text-[#1D1D1F] focus:outline-none focus:ring-2 focus:ring-[#0071E3]/20 focus:border-[#0071E3]"
+              placeholder="Search receipt #, customer, or staff..."
+              className="w-full h-9 pl-8 pr-3 rounded-lg border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-950 text-xs text-zinc-950 dark:text-zinc-50 focus:outline-none"
             />
           </div>
         </div>
       </div>
 
-      {/* BILLS TABLE */}
-      <div className="bg-white rounded-2xl border border-[#E5E5E7] overflow-hidden shadow-xs">
+      {/* Invoices Table */}
+      <div className="bg-white dark:bg-zinc-900 rounded-2xl border border-zinc-200 dark:border-zinc-800 overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-left text-xs">
-            <thead className="bg-[#F5F5F7] text-[#1D1D1F] font-bold uppercase border-b border-[#E5E5E7]">
+            <thead className="bg-zinc-50 dark:bg-zinc-950 text-zinc-500 border-b border-zinc-200 dark:border-zinc-800">
               <tr>
-                <th className="py-3 px-4">Bill No</th>
-                <th className="py-3 px-4">Date &amp; Time</th>
-                <th className="py-3 px-4">School</th>
-                <th className="py-3 px-4">Customer</th>
-                <th className="py-3 px-4">Items</th>
-                <th className="py-3 px-4">Total</th>
-                <th className="py-3 px-4">Payment &amp; Staff</th>
-                <th className="py-3 px-4 text-right">Actions</th>
+                <th className="py-3 px-4 font-medium">Receipt #</th>
+                <th className="py-3 px-4 font-medium">Date</th>
+                <th className="py-3 px-4 font-medium">Customer</th>
+                <th className="py-3 px-4 font-medium">Items</th>
+                <th className="py-3 px-4 font-medium text-right">Total</th>
+                <th className="py-3 px-4 font-medium">Payment &amp; Staff</th>
+                <th className="py-3 px-4 font-medium text-right">Actions</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-[#E5E5E7]">
+            <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800">
               {filteredBills.map(bill => {
-                const dateStr = new Date(bill.created_at).toLocaleString('en-IN', {
-                  day: 'numeric',
-                  month: 'short',
-                  hour: '2-digit',
-                  minute: '2-digit',
-                });
                 const isVoided = bill.status === 'voided';
+                const totalUnits = bill.items.reduce((acc, it) => acc + it.qty, 0);
 
                 return (
-                  <tr key={bill.id} className={`hover:bg-[#F5F5F7]/60 transition-colors ${isVoided ? 'opacity-50 bg-[#F5F5F7]' : ''}`}>
-                    <td className="py-3 px-4 font-bold text-[#1D1D1F]">
+                  <tr
+                    key={bill.id}
+                    className={`hover:bg-zinc-50/70 dark:hover:bg-zinc-800/40 ${
+                      isVoided ? 'opacity-50' : ''
+                    }`}
+                  >
+                    <td className="py-3 px-4 font-mono font-bold text-zinc-950 dark:text-zinc-50">
                       {bill.bill_number}
                     </td>
-                    <td className="py-3 px-4 font-medium text-[#86868B]">
-                      {dateStr}
-                    </td>
-                    <td className="py-3 px-4 font-bold text-[#1D1D1F]">
-                      {bill.schools && bill.schools.length > 1 ? (
-                        <div className="flex flex-col gap-0.5">
-                          <span className="inline-block text-[10px] font-bold bg-[#F5F5F7] text-[#1D1D1F] px-1.5 py-0.5 rounded border border-[#E5E5E7] w-fit">
-                            Multi-School ({bill.schools.length})
-                          </span>
-                          <span className="text-xs truncate max-w-[200px]" title={bill.school_name}>
-                            {bill.school_name}
-                          </span>
-                        </div>
-                      ) : (
-                        <span>{bill.school_name}</span>
-                      )}
-                    </td>
-                    <td className="py-3 px-4 font-semibold text-[#1D1D1F]">
-                      {bill.customer_name || bill.customer_phone ? (
-                        <div>
-                          <span>{bill.customer_name || 'Customer'}</span>
-                          {bill.customer_phone && (
-                            <span className="block text-[11px] font-normal text-[#86868B]">
-                              {bill.customer_phone}
-                            </span>
-                          )}
-                        </div>
-                      ) : (
-                        <span className="text-[#86868B]">Walk-in</span>
-                      )}
-                    </td>
-                    <td className="py-3 px-4 font-semibold text-[#86868B]">
-                      {bill.items.length} items
-                    </td>
-                    <td className="py-3 px-4 font-bold text-sm text-[#1D1D1F]">
-                      ₹{bill.total.toLocaleString('en-IN')}
+                    <td className="py-3 px-4 text-zinc-500 tabular-nums whitespace-nowrap">
+                      {formatDateShort(bill.created_at, shopConfig)} ·{' '}
+                      {formatTimeShort(bill.created_at, shopConfig)}
                     </td>
                     <td className="py-3 px-4">
-                      <div>
-                        {isVoided ? (
-                          <span className="inline-block px-2 py-0.5 rounded-full text-[10px] font-bold bg-red-100 text-red-700">
-                            VOIDED
-                          </span>
-                        ) : !bill.is_paid ? (
-                          <span className="inline-block px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800">
-                            Credit Pending
-                          </span>
-                        ) : (
-                          <span className="inline-block px-2 py-0.5 rounded-full text-[10px] font-bold bg-[#F5F5F7] border border-[#E5E5E7] text-[#1D1D1F] capitalize">
-                            {bill.payment_method} · Paid
-                          </span>
-                        )}
-                        {bill.billed_by_name && (
-                          <div className="text-[10px] text-[#86868B] font-medium mt-0.5">
-                            Billed by: {bill.billed_by_name}
-                          </div>
-                        )}
+                      <div className="font-semibold text-zinc-900 dark:text-zinc-100">
+                        {bill.customer_name || 'Walk-in'}
                       </div>
+                      {(bill.customer_phone || (bill.school_name && bill.school_name !== 'Walk-in Retail')) && (
+                        <div className="text-[11px] text-zinc-500">
+                          {[bill.customer_phone, bill.school_name !== 'Walk-in Retail' ? bill.school_name : null]
+                            .filter(Boolean)
+                            .join(' · ')}
+                        </div>
+                      )}
+                    </td>
+                    <td className="py-3 px-4 text-zinc-600 dark:text-zinc-300 tabular-nums">
+                      {totalUnits} unit{totalUnits === 1 ? '' : 's'}
+                    </td>
+                    <td className="py-3 px-4 text-right font-mono font-bold tabular-nums text-zinc-950 dark:text-zinc-50">
+                      <div>{formatMoney(Math.max(0, (bill.total || 0) - (bill.refunded_amount || 0)), shopConfig)}</div>
+                      {(bill.refunded_amount || 0) > 0 && (
+                        <div className="text-[11px] font-normal text-amber-600 dark:text-amber-400">
+                          · Refunded -{formatMoney(bill.refunded_amount || 0, shopConfig)}
+                        </div>
+                      )}
+                    </td>
+                    <td className="py-3 px-4">
+                      <div
+                        className={`font-medium ${
+                          isVoided
+                            ? 'text-rose-600 dark:text-rose-400'
+                            : !bill.is_paid
+                            ? 'text-amber-600 dark:text-amber-400'
+                            : 'text-zinc-900 dark:text-zinc-100'
+                        }`}
+                      >
+                        {isVoided
+                          ? 'Voided'
+                          : !bill.is_paid
+                          ? 'Credit Due'
+                          : `${getPaymentMethodLabel(bill.payment_method, shopConfig)} · Paid`}
+                      </div>
+                      {bill.billed_by_name && (
+                        <div className="text-[11px] text-zinc-500">{bill.billed_by_name}</div>
+                      )}
                     </td>
                     <td className="py-3 px-4 text-right">
-                      <div className="flex items-center justify-end gap-1.5">
-                        {/* View/Print Receipt */}
+                      <div className="inline-flex items-center justify-end gap-1.5">
                         <button
+                          type="button"
                           onClick={() => onOpenReceipt(bill)}
-                          className="px-2.5 py-1 rounded-lg bg-[#F5F5F7] hover:bg-[#E5E5E7] text-[#1D1D1F] font-semibold text-xs border border-[#E5E5E7] transition-colors cursor-pointer"
-                          title="Print / View Receipt"
+                          className="px-2.5 py-1 rounded-lg border border-zinc-200 dark:border-zinc-800 hover:bg-zinc-100 dark:hover:bg-zinc-800 font-semibold cursor-pointer"
                         >
                           Receipt
                         </button>
-
-                        {/* Size Exchange button */}
                         {!isVoided && (
                           <button
+                            type="button"
                             onClick={() => {
                               setExchangeBillTarget(bill);
                               setIsExchangeOpen(true);
                             }}
-                            className="px-2 py-1 rounded-lg bg-white hover:bg-[#F5F5F7] text-[#1D1D1F] font-semibold text-xs border border-[#E5E5E7] transition-colors cursor-pointer"
-                            title="Exchange Size for this Bill"
+                            className="px-2.5 py-1 rounded-lg border border-zinc-200 dark:border-zinc-800 hover:bg-zinc-100 dark:hover:bg-zinc-800 font-semibold cursor-pointer"
                           >
-                            Exchange
+                            Returns
                           </button>
                         )}
-
-                        {/* Settle button if unpaid */}
                         {!bill.is_paid && !isVoided && (
                           <button
+                            type="button"
                             onClick={() => handleSettleCredit(bill)}
-                            className="px-2 py-1 rounded-lg bg-[#1D1D1F] hover:bg-black text-white font-semibold text-xs transition-colors cursor-pointer"
-                            title="Mark Paid"
+                            className="px-2.5 py-1 rounded-lg bg-zinc-950 dark:bg-zinc-100 text-white dark:text-zinc-950 font-semibold cursor-pointer"
                           >
                             Mark Paid
                           </button>
                         )}
-
-                        {/* Void button with power distribution check */}
                         {!isVoided && (
                           <button
+                            type="button"
                             onClick={() => handleInitiateVoid(bill)}
-                            className="p-1 text-[#86868B] hover:text-red-600 transition-colors cursor-pointer"
-                            title="Void Bill (Manager PIN required for Cashiers)"
+                            className="p-1 text-zinc-400 hover:text-rose-600 cursor-pointer"
+                            title="Void invoice"
                           >
                             <XCircle className="w-4 h-4" />
                           </button>
@@ -502,10 +546,11 @@ export const BillsHistory: React.FC<BillsHistoryProps> = ({ onOpenReceipt }) => 
                   </tr>
                 );
               })}
+
               {filteredBills.length === 0 && (
                 <tr>
-                  <td colSpan={8} className="py-8 text-center text-xs text-[#86868B]">
-                    No bills found.
+                  <td colSpan={7} className="py-10 text-center text-xs text-zinc-500">
+                    No matching invoices found.
                   </td>
                 </tr>
               )}
@@ -513,61 +558,58 @@ export const BillsHistory: React.FC<BillsHistoryProps> = ({ onOpenReceipt }) => 
           </table>
         </div>
       </div>
+        </>
+      )}
 
-      {/* In-App Void Confirmation Modal (No window.confirm) */}
+      {/* Void Confirmation Modal */}
       {isVoidModalOpen && billToVoid && (
-        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl border border-red-200 animate-in zoom-in-95 space-y-4">
+        <div className="fixed inset-0 z-50 bg-zinc-950/70 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-zinc-900 rounded-2xl max-w-md w-full p-6 border border-zinc-200 dark:border-zinc-800 space-y-4">
             <div className="flex items-center justify-between">
-              <div className="w-12 h-12 rounded-2xl bg-red-100 text-red-600 flex items-center justify-center">
-                <XCircle className="w-6 h-6" />
-              </div>
-              <button
-                onClick={() => {
-                  setIsVoidModalOpen(false);
-                  setBillToVoid(null);
-                }}
-                className="text-slate-400 hover:text-slate-600"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            <div>
-              <h3 className="font-extrabold text-lg text-[#1D1D1F]">
-                Void Bill #{billToVoid.bill_number}?
+              <h3 className="font-bold text-base text-zinc-950 dark:text-zinc-50">
+                Void Invoice #{billToVoid.bill_number}?
               </h3>
-              <p className="text-xs text-[#86868B] mt-1.5">
-                Total Amount: <strong className="text-[#1D1D1F]">₹{billToVoid.total}</strong> ({billToVoid.items.length} items).
-                Voiding will automatically restore all {billToVoid.items.length} items back to stock.
-              </p>
-            </div>
-
-            <div className="flex items-center gap-2 pt-2">
               <button
                 type="button"
                 onClick={() => {
                   setIsVoidModalOpen(false);
                   setBillToVoid(null);
                 }}
-                className="flex-1 py-2.5 rounded-xl border border-[#E5E5E7] text-xs font-bold text-[#86868B] hover:bg-[#F5F5F7] cursor-pointer"
+                className="p-1 text-zinc-400 hover:text-zinc-900 dark:hover:text-white cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <p className="text-xs text-zinc-500 dark:text-zinc-400">
+              Total:{' '}
+              <strong className="font-mono text-zinc-950 dark:text-zinc-50">
+                {formatMoney(billToVoid.total, shopConfig)}
+              </strong>
+              . Voiding restores all item stock back to inventory.
+            </p>
+            <div className="flex justify-end gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setIsVoidModalOpen(false);
+                  setBillToVoid(null);
+                }}
+                className="px-4 py-2 rounded-lg border border-zinc-200 dark:border-zinc-800 text-xs font-semibold cursor-pointer"
               >
                 Cancel
               </button>
               <button
                 type="button"
                 onClick={executeVoidBill}
-                className="flex-1 py-2.5 rounded-xl bg-red-600 hover:bg-red-700 text-white text-xs font-extrabold shadow-sm flex items-center justify-center gap-1.5"
+                className="px-4 py-2 rounded-lg bg-rose-600 hover:bg-rose-700 text-white text-xs font-semibold cursor-pointer"
               >
-                <XCircle className="w-3.5 h-3.5" />
-                <span>Yes, Void Bill</span>
+                Void Invoice
               </button>
             </div>
           </div>
         </div>
       )}
 
-      {/* Manager Override Authorization Modal for Cashier Void Requests */}
       <ManagerOverrideModal
         isOpen={isManagerOverrideOpen}
         onClose={() => {
@@ -578,17 +620,15 @@ export const BillsHistory: React.FC<BillsHistoryProps> = ({ onOpenReceipt }) => 
           setIsManagerOverrideOpen(false);
           setIsVoidModalOpen(true);
         }}
-        actionTitle="Shift Lead Confirmation: Void Bill"
-        actionDescription={`Enter 6-digit Shift Lead or Store Admin PIN to confirm voiding Bill #${billToVoid?.bill_number}.`}
+        actionTitle="Shift Lead Confirmation: Void Invoice"
+        actionDescription={`Enter 6-digit Shift Lead or Admin PIN to void #${billToVoid?.bill_number}.`}
       />
 
-      {/* Day-Close Z-Report & Cash Drawer Tally Modal */}
       <DayCloseReportModal
         isOpen={isDayCloseOpen}
         onClose={() => setIsDayCloseOpen(false)}
       />
 
-      {/* Garment Size Exchange Desk Modal */}
       <ExchangeReturnModal
         isOpen={isExchangeOpen}
         onClose={() => {
@@ -596,17 +636,16 @@ export const BillsHistory: React.FC<BillsHistoryProps> = ({ onOpenReceipt }) => 
           setExchangeBillTarget(null);
         }}
         preselectedBill={exchangeBillTarget}
-        onComplete={async () => {
-          await loadBills();
-        }}
+        onComplete={loadBills}
       />
 
-      {/* GST CMP-08 Quarterly Composition Statement Modal */}
-      <GstCompositionReportModal
-        isOpen={isGstModalOpen}
-        onClose={() => setIsGstModalOpen(false)}
-        config={shopConfig}
-      />
+      {showGstReport && (
+        <GstCompositionReportModal
+          isOpen={isGstModalOpen}
+          onClose={() => setIsGstModalOpen(false)}
+          config={shopConfig}
+        />
+      )}
     </div>
   );
 };

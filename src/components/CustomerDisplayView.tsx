@@ -1,30 +1,28 @@
 import React, { useState, useEffect } from 'react';
-import { 
-  CheckCircle2, 
-  Maximize, 
-  Minimize,
-  User,
-  School,
-  Tag
-} from 'lucide-react';
+import { CheckCircle2, Maximize, Minimize, User } from 'lucide-react';
 import QRCode from 'qrcode';
 import { db } from '../db/db';
+import { getPaymentMethodLabel } from '../lib/locale';
+import { type PaymentMethod } from '../types';
 
 export interface CustomerDisplayPayload {
+  terminalId?: string;
   shopName: string;
-  upiId: string;
-  studentName?: string;
-  studentGrade?: string;
-  schoolName?: string;
+  currencySymbol?: string;
+  currencyCode?: string;
+  locale?: string;
+  upiId?: string;
+  customerName?: string;
   cart: {
     product_name: string;
-    size_label?: string;
-    school_name?: string;
-    school_code?: string;
+    size_label?: string | null;
+    color_label?: string | null;
     qty: number;
     unit_price: number;
   }[];
   subtotal: number;
+  taxAmount?: number;
+  taxLabel?: string;
   discount: number;
   grandTotal: number;
   paymentMethod: string;
@@ -33,12 +31,38 @@ export interface CustomerDisplayPayload {
   lastBillNumber?: string;
 }
 
+function formatDisplayMoney(amount: number, data: CustomerDisplayPayload): string {
+  const sym = data.currencySymbol || '₹';
+  const loc = data.locale || 'en-IN';
+  const code = data.currencyCode || 'INR';
+  const isWhole = code === 'INR' && Math.abs(amount % 1) < 0.001;
+  try {
+    return `${sym}${new Intl.NumberFormat(loc, {
+      minimumFractionDigits: isWhole ? 0 : 2,
+      maximumFractionDigits: 2,
+    }).format(amount || 0)}`;
+  } catch {
+    return `${sym}${(amount || 0).toFixed(2)}`;
+  }
+}
+
 export const CustomerDisplayView: React.FC = () => {
+  const terminalId =
+    typeof window !== 'undefined'
+      ? new URLSearchParams(window.location.search).get('terminal') || 'default'
+      : 'default';
+
   const [data, setData] = useState<CustomerDisplayPayload>({
-    shopName: 'SARASWATI GARMENTS',
-    upiId: 'saraswatigarments@upi',
+    terminalId,
+    shopName: 'SIKKADESK RETAIL',
+    currencySymbol: '₹',
+    currencyCode: 'INR',
+    locale: 'en-IN',
+    upiId: '',
     cart: [],
     subtotal: 0,
+    taxAmount: 0,
+    taxLabel: 'GST',
     discount: 0,
     grandTotal: 0,
     paymentMethod: 'cash',
@@ -49,30 +73,32 @@ export const CustomerDisplayView: React.FC = () => {
   const [upiQrUrl, setUpiQrUrl] = useState<string>('');
   const [isFullscreen, setIsFullscreen] = useState(false);
 
-  // Multi-source real-time synchronization
   useEffect(() => {
     let channel: BroadcastChannel | null = null;
+    const channelName = `counterly_display_${terminalId}`;
+    const storageKey = `counterly_display_state_${terminalId}`;
+
     try {
-      channel = new BroadcastChannel('nandalaya_customer_display');
+      channel = new BroadcastChannel(channelName);
       channel.onmessage = (event: MessageEvent) => {
         if (event.data && typeof event.data === 'object' && event.data.type !== 'REQUEST_STATE') {
           setData(event.data);
         }
       };
       channel.postMessage({ type: 'REQUEST_STATE' });
-    } catch (e) {
-      console.warn('BroadcastChannel fallback');
+    } catch {
+      // BroadcastChannel unsupported
     }
 
     const syncSources = async () => {
       try {
-        const dbState = await db.customer_display_state.get('active');
+        const dbState = await db.customer_display_state.get(terminalId);
         if (dbState && dbState.timestamp) {
           setData(prev => (JSON.stringify(prev) !== JSON.stringify(dbState) ? dbState : prev));
           return;
         }
 
-        const stored = localStorage.getItem('nandalaya_customer_display_state');
+        const stored = localStorage.getItem(storageKey);
         if (stored) {
           const parsed = JSON.parse(stored);
           if (parsed && typeof parsed === 'object') {
@@ -81,67 +107,64 @@ export const CustomerDisplayView: React.FC = () => {
           }
         }
 
-        const resp = await fetch('/api/customer-display');
+        const resp = await fetch(`/api/display/${encodeURIComponent(terminalId)}`);
         if (resp.ok) {
           const srvData = await resp.json();
           if (srvData && srvData.timestamp) {
             setData(prev => (JSON.stringify(prev) !== JSON.stringify(srvData) ? srvData : prev));
           }
         }
-      } catch (err) {
+      } catch {
         // silent sync
       }
     };
 
     syncSources();
+    const pollInterval = setInterval(syncSources, 350);
 
     const handleStorage = (e: StorageEvent) => {
-      if (e.key === 'nandalaya_customer_display_state' && e.newValue) {
+      if (e.key === storageKey && e.newValue) {
         try {
           setData(JSON.parse(e.newValue));
-        } catch (err) {
-          console.error(err);
+        } catch {
+          // ignore
         }
       }
     };
     window.addEventListener('storage', handleStorage);
-    const pollInterval = setInterval(syncSources, 250);
 
     return () => {
       if (channel) channel.close();
       clearInterval(pollInterval);
       window.removeEventListener('storage', handleStorage);
     };
-  }, []);
+  }, [terminalId]);
 
-  // Auto-reset completed screen to idle after 5 seconds
   useEffect(() => {
     if (data.status === 'completed') {
       const t = setTimeout(() => {
-        setData(prev => (prev.status === 'completed' ? { ...prev, status: 'idle' } : prev));
+        setData(prev => (prev.status === 'completed' ? { ...prev, status: 'idle', cart: [], grandTotal: 0 } : prev));
       }, 5000);
       return () => clearTimeout(t);
     }
   }, [data.status]);
 
-  // Determine if UPI payment is specifically active
-  const isUpiActive = (data.paymentMethod === 'upi') || (data.paymentMethod === 'split' && data.upiAmount > 0);
+  const isUpiActive =
+    Boolean(data.upiId) &&
+    ((data.paymentMethod === 'upi') || (data.paymentMethod === 'split' && data.upiAmount > 0));
   const upiPayableAmount = data.upiAmount > 0 ? data.upiAmount : data.grandTotal;
 
-  // Generate UPI QR ONLY when UPI mode is actively selected
   useEffect(() => {
-    if (isUpiActive && upiPayableAmount > 0) {
-      const vpa = data.upiId || 'saraswatigarments@upi';
-      const payee = encodeURIComponent(data.shopName || 'Saraswati Garments');
-      const upiUrl = `upi://pay?pa=${vpa}&pn=${payee}&am=${upiPayableAmount}&cu=INR&tn=Bill+Payment`;
-
-      QRCode.toDataURL(upiUrl, { width: 340, margin: 1 })
+    if (isUpiActive && upiPayableAmount > 0 && data.upiId) {
+      const payee = encodeURIComponent(data.shopName || 'Retail Store');
+      const upiUrl = `upi://pay?pa=${data.upiId}&pn=${payee}&am=${upiPayableAmount}&cu=${data.currencyCode || 'INR'}&tn=POS+Payment`;
+      QRCode.toDataURL(upiUrl, { width: 320, margin: 1 })
         .then(url => setUpiQrUrl(url))
-        .catch(err => console.error('Failed to generate customer QR:', err));
+        .catch(() => setUpiQrUrl(''));
     } else {
       setUpiQrUrl('');
     }
-  }, [isUpiActive, upiPayableAmount, data.upiId, data.shopName]);
+  }, [isUpiActive, upiPayableAmount, data.upiId, data.shopName, data.currencyCode]);
 
   const toggleFullscreen = () => {
     if (!document.fullscreenElement) {
@@ -151,250 +174,128 @@ export const CustomerDisplayView: React.FC = () => {
     }
   };
 
-  const totalItemsCount = data.cart.reduce((a, b) => a + b.qty, 0);
-
   return (
-    <div 
-      onDoubleClick={toggleFullscreen}
-      className="min-h-screen bg-[#F5F5F7] text-[#1D1D1F] font-sans flex flex-col justify-center items-center p-6 sm:p-10 select-none antialiased relative"
-    >
-      {/* Discreet Fullscreen Toggle (Only visible on hover) */}
-      <button
-        onClick={toggleFullscreen}
-        className="absolute top-4 right-4 p-2 rounded-xl text-[#86868B] hover:text-[#1D1D1F] hover:bg-white/80 transition-all opacity-20 hover:opacity-100 z-50"
-        title={isFullscreen ? 'Exit Fullscreen' : 'Fullscreen'}
-      >
-        {isFullscreen ? <Minimize className="w-4 h-4" /> : <Maximize className="w-4 h-4" />}
-      </button>
+    <div className="min-h-screen bg-zinc-50 dark:bg-zinc-950 text-zinc-950 dark:text-zinc-50 flex flex-col justify-between p-6 sm:p-10 select-none">
+      {/* Top Bar */}
+      <div className="flex items-center justify-between border-b border-zinc-200 dark:border-zinc-800 pb-5">
+        <div>
+          <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">{data.shopName}</h1>
+          <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">
+            Customer Checkout Display · Terminal {terminalId}
+          </p>
+        </div>
 
-      {/* Main Container */}
-      <div className="w-full max-w-5xl mx-auto flex flex-col justify-center">
+        <button
+          type="button"
+          onClick={toggleFullscreen}
+          className="p-2.5 rounded-lg border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-zinc-600 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 cursor-pointer"
+          title="Toggle Fullscreen"
+        >
+          {isFullscreen ? <Minimize className="w-4 h-4" /> : <Maximize className="w-4 h-4" />}
+        </button>
+      </div>
 
+      {/* Main Stage */}
+      <div className="flex-1 py-8 flex items-center justify-center">
         {data.status === 'completed' ? (
-          /* Payment Received Screen */
-          <div className="bg-white border border-[#E5E5EA] rounded-3xl p-10 sm:p-14 text-center shadow-[0_4px_24px_rgba(0,0,0,0.06)] space-y-5 max-w-md mx-auto animate-in zoom-in-95">
-            <div className="w-20 h-20 rounded-full bg-[#E8F8EE] text-[#34C759] flex items-center justify-center mx-auto ring-8 ring-[#E8F8EE]/60">
-              <CheckCircle2 className="w-12 h-12" />
+          <div className="text-center space-y-3 max-w-md">
+            <div className="w-16 h-16 rounded-2xl bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-200 dark:border-emerald-800 text-emerald-600 dark:text-emerald-400 mx-auto flex items-center justify-center">
+              <CheckCircle2 className="w-8 h-8" />
             </div>
-            
-            <div className="space-y-1">
-              <h2 className="text-2xl sm:text-3xl font-bold text-[#1D1D1F]">Payment Received</h2>
-              <p className="text-sm text-[#86868B]">Thank you for shopping with us</p>
+            <h2 className="text-3xl font-bold tracking-tight">Thank You</h2>
+            <p className="text-sm text-zinc-500 dark:text-zinc-400">
+              Payment received{data.lastBillNumber ? ` · Receipt ${data.lastBillNumber}` : ''}
+            </p>
+          </div>
+        ) : data.cart.length === 0 ? (
+          <div className="text-center space-y-2 max-w-md">
+            <p className="text-2xl font-semibold tracking-tight">Welcome to {data.shopName}</p>
+            <p className="text-sm text-zinc-500 dark:text-zinc-400">
+              Your items and total will appear here as they are scanned.
+            </p>
+          </div>
+        ) : (
+          <div className="w-full max-w-5xl grid grid-cols-1 lg:grid-cols-5 gap-6 items-start">
+            {/* Items Table */}
+            <div className="lg:col-span-3 bg-white dark:bg-zinc-900 rounded-2xl border border-zinc-200 dark:border-zinc-800 p-6 space-y-4">
+              {data.customerName && (
+                <div className="flex items-center gap-2 text-xs font-medium text-zinc-600 dark:text-zinc-400 pb-3 border-b border-zinc-200 dark:border-zinc-800">
+                  <User className="w-3.5 h-3.5" />
+                  <span>Customer: {data.customerName}</span>
+                </div>
+              )}
+
+              <div className="divide-y divide-zinc-100 dark:divide-zinc-800 max-h-[55vh] overflow-y-auto">
+                {data.cart.map((item, idx) => {
+                  const varLabel = [item.size_label, item.color_label].filter(Boolean).join(' · ');
+                  return (
+                    <div key={idx} className="py-3 flex items-center justify-between gap-4">
+                      <div>
+                        <div className="text-sm font-semibold">{item.product_name}</div>
+                        <div className="text-xs text-zinc-500 dark:text-zinc-400">
+                          {varLabel ? `${varLabel} · ` : ''}Qty {item.qty} × {formatDisplayMoney(item.unit_price, data)}
+                        </div>
+                      </div>
+                      <div className="text-sm font-semibold font-mono tabular-nums">
+                        {formatDisplayMoney(item.qty * item.unit_price, data)}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
             </div>
 
-            <div className="pt-3 pb-1">
-              <div className="text-4xl font-mono font-bold text-[#1D1D1F]">
-                ₹{data.grandTotal.toLocaleString('en-IN')}
+            {/* Totals & QR */}
+            <div className="lg:col-span-2 bg-white dark:bg-zinc-900 rounded-2xl border border-zinc-200 dark:border-zinc-800 p-6 space-y-5">
+              <div className="space-y-2 text-sm">
+                <div className="flex justify-between text-zinc-600 dark:text-zinc-400">
+                  <span>Subtotal</span>
+                  <span className="font-mono tabular-nums">{formatDisplayMoney(data.subtotal, data)}</span>
+                </div>
+                {data.discount > 0 && (
+                  <div className="flex justify-between text-emerald-600 dark:text-emerald-400">
+                    <span>Discount</span>
+                    <span className="font-mono tabular-nums">-{formatDisplayMoney(data.discount, data)}</span>
+                  </div>
+                )}
+                {Boolean(data.taxAmount && data.taxAmount > 0) && (
+                  <div className="flex justify-between text-zinc-600 dark:text-zinc-400">
+                    <span>{data.taxLabel || 'Tax'}</span>
+                    <span className="font-mono tabular-nums">{formatDisplayMoney(data.taxAmount || 0, data)}</span>
+                  </div>
+                )}
               </div>
-              {data.lastBillNumber && (
-                <div className="inline-block mt-3 px-3 py-1 bg-[#F5F5F7] border border-[#E5E5EA] rounded-lg text-xs font-mono font-medium text-[#86868B]">
-                  Invoice #{data.lastBillNumber}
+
+              <div className="pt-4 border-t border-zinc-200 dark:border-zinc-800">
+                <div className="text-xs text-zinc-500 dark:text-zinc-400">Amount Due</div>
+                <div className="text-4xl font-bold font-mono tabular-nums tracking-tight mt-1">
+                  {formatDisplayMoney(data.grandTotal, data)}
+                </div>
+                <div className="text-xs text-zinc-500 dark:text-zinc-400 mt-1">
+                  Payment: {getPaymentMethodLabel(data.paymentMethod as PaymentMethod)}
+                </div>
+              </div>
+
+              {isUpiActive && upiQrUrl && (
+                <div className="pt-4 border-t border-zinc-200 dark:border-zinc-800 text-center space-y-2">
+                  <img
+                    src={upiQrUrl}
+                    alt="Scan to pay"
+                    className="w-44 h-44 mx-auto rounded-xl border border-zinc-200 bg-white p-2"
+                  />
+                  <p className="text-xs font-medium text-zinc-600 dark:text-zinc-400">
+                    Scan to pay {formatDisplayMoney(upiPayableAmount, data)}
+                  </p>
                 </div>
               )}
             </div>
           </div>
-
-        ) : data.cart.length === 0 || data.status === 'idle' ? (
-          /* Pure Minimal Idle State */
-          <div className="text-center py-28 space-y-2 animate-in fade-in duration-300">
-            <p className="text-xs sm:text-sm font-semibold tracking-widest uppercase text-[#86868B]">
-              Welcome to
-            </p>
-            <h1 className="text-4xl sm:text-5xl lg:text-6xl font-bold tracking-tight text-[#1D1D1F]">
-              {data.shopName || 'SARASWATI GARMENTS'}
-            </h1>
-          </div>
-
-        ) : (
-          /* Active Billing State */
-          <div className="w-full space-y-4 animate-in fade-in duration-200">
-            {/* Store & Customer Header Line */}
-            <div className="flex items-center justify-between px-2">
-              <span className="font-bold text-xl tracking-tight text-[#1D1D1F]">
-                {data.shopName || 'SARASWATI GARMENTS'}
-              </span>
-
-              <div className="flex items-center gap-3">
-                {data.schoolName && (
-                  <div className="flex items-center gap-1.5 px-3 py-1 rounded-xl bg-white border border-[#E5E5EA] text-[#1D1D1F] text-xs font-semibold shadow-[0_1px_2px_rgba(0,0,0,0.03)]">
-                    <School className="w-3.5 h-3.5 text-[#86868B]" />
-                    <span>{data.schoolName}</span>
-                  </div>
-                )}
-                {data.studentName && (
-                  <div className="flex items-center gap-1.5 px-3 py-1 rounded-xl bg-[#F5F5F7] text-[#1D1D1F] text-xs font-semibold">
-                    <User className="w-3.5 h-3.5 text-[#86868B]" />
-                    <span>{data.studentName} {data.studentGrade ? `(${data.studentGrade})` : ''}</span>
-                  </div>
-                )}
-              </div>
-            </div>
-
-            {/* Split or Full Width based on whether UPI scanner is active */}
-            {isUpiActive ? (
-              /* 2-Column Mode: Items + UPI Scanner */
-              <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-stretch">
-                {/* Left: Items Summary */}
-                <div className="lg:col-span-7 bg-white border border-[#E5E5EA] rounded-3xl p-6 sm:p-7 flex flex-col justify-between shadow-[0_2px_12px_rgba(0,0,0,0.04)]">
-                  <div>
-                    <div className="flex items-center justify-between pb-3 border-b border-[#F5F5F7]">
-                      <span className="text-xs font-bold uppercase tracking-wider text-[#86868B]">
-                        Items ({totalItemsCount})
-                      </span>
-                    </div>
-
-                    <div className="divide-y divide-[#F5F5F7] max-h-72 overflow-y-auto pr-1 my-2 scrollbar-thin">
-                      {data.cart.map((item, idx) => (
-                        <div key={idx} className="py-3 flex items-center justify-between gap-3">
-                          <div>
-                            <div className="text-sm font-semibold text-[#1D1D1F] flex items-center gap-2">
-                              <span>{item.product_name}</span>
-                              {item.size_label && (
-                                <span className="text-xs font-semibold bg-[#F5F5F7] text-[#1D1D1F] px-2 py-0.5 rounded-md border border-[#E5E5EA]">
-                                  Size {item.size_label}
-                                </span>
-                              )}
-                            </div>
-                            <div className="text-xs text-[#86868B] mt-0.5 font-mono">
-                              {item.qty} × ₹{item.unit_price}
-                            </div>
-                          </div>
-
-                          <div className="text-sm font-mono font-semibold text-[#1D1D1F]">
-                            ₹{(item.unit_price * item.qty).toLocaleString('en-IN')}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-
-                  {/* Total Strip */}
-                  <div className="pt-3 border-t border-[#F5F5F7] space-y-1.5">
-                    {data.discount > 0 && (
-                      <div className="flex justify-between text-xs text-[#34C759] font-semibold">
-                        <span className="flex items-center gap-1">
-                          <Tag className="w-3 h-3" />
-                          Discount
-                        </span>
-                        <span className="font-mono">-₹{data.discount.toLocaleString('en-IN')}</span>
-                      </div>
-                    )}
-                    <div className="flex justify-between items-baseline pt-1">
-                      <span className="text-xs font-bold uppercase tracking-wider text-[#86868B]">Total</span>
-                      <span className="font-mono text-[#1D1D1F] text-3xl font-bold">
-                        ₹{data.grandTotal.toLocaleString('en-IN')}
-                      </span>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Right: UPI Scanner Standee */}
-                <div className="lg:col-span-5 bg-[#1D1D1F] rounded-3xl p-6 sm:p-7 flex flex-col justify-between items-center text-center shadow-[0_4px_24px_rgba(0,0,0,0.12)] text-white">
-                  <div className="space-y-0.5">
-                    <span className="text-[11px] font-semibold uppercase tracking-wider text-[#0071E3]">
-                      {data.paymentMethod === 'split' ? 'Scan UPI Portion' : 'Scan to Pay'}
-                    </span>
-                    <div className="text-4xl sm:text-5xl font-mono font-bold tracking-tight text-white">
-                      ₹{upiPayableAmount.toLocaleString('en-IN')}
-                    </div>
-                  </div>
-
-                  <div className="my-3">
-                    <div className="p-3 bg-white rounded-2xl shadow-xl inline-block">
-                      {upiQrUrl ? (
-                        <img src={upiQrUrl} alt="UPI QR" className="w-52 h-52 object-contain" />
-                      ) : (
-                        <div className="w-52 h-52 bg-slate-50 rounded-xl flex items-center justify-center text-xs text-slate-400">
-                          Generating QR...
-                        </div>
-                      )}
-                    </div>
-                  </div>
-
-                  <div className="space-y-1">
-                    <div className="text-xs font-medium text-slate-300 flex items-center justify-center gap-2">
-                      <span className="bg-white/10 px-2 py-0.5 rounded">GPay</span>
-                      <span className="bg-white/10 px-2 py-0.5 rounded">PhonePe</span>
-                      <span className="bg-white/10 px-2 py-0.5 rounded">Paytm</span>
-                      <span className="bg-white/10 px-2 py-0.5 rounded">BHIM</span>
-                    </div>
-                    <div className="text-[10px] font-mono text-[#86868B] pt-0.5">
-                      {data.upiId || 'saraswatigarments@upi'}
-                    </div>
-                  </div>
-                </div>
-              </div>
-            ) : (
-              /* Full-Width Focused Order View (No UPI scanner!) */
-              <div className="bg-white border border-[#E5E5EA] rounded-3xl p-6 sm:p-8 shadow-[0_2px_12px_rgba(0,0,0,0.04)] space-y-6">
-                <div className="flex items-center justify-between pb-4 border-b border-[#F5F5F7]">
-                  <span className="text-xs font-bold uppercase tracking-wider text-[#86868B]">
-                    Order Items ({totalItemsCount})
-                  </span>
-
-                  {data.paymentMethod === 'card' ? (
-                    <span className="text-xs font-semibold text-[#1D1D1F] bg-[#F5F5F7] px-2.5 py-1 rounded-lg border border-[#E5E5EA]">
-                      Card Payment
-                    </span>
-                  ) : (
-                    <span className="text-xs font-semibold text-[#6E6E73] bg-[#F5F5F7] px-2.5 py-1 rounded-lg border border-[#E5E5EA]">
-                      Cash Payment
-                    </span>
-                  )}
-                </div>
-
-                {/* Generous Item Rows */}
-                <div className="divide-y divide-[#F5F5F7] max-h-96 overflow-y-auto pr-2 scrollbar-thin">
-                  {data.cart.map((item, idx) => (
-                    <div key={idx} className="py-4 flex items-center justify-between gap-4">
-                      <div>
-                        <div className="text-base font-semibold text-[#1D1D1F] flex items-center gap-2 flex-wrap">
-                          <span>{item.product_name}</span>
-                          {item.school_code && (
-                            <span className="text-[11px] font-medium bg-[#F5F5F7] text-[#6E6E73] px-2 py-0.5 rounded border border-[#E5E5EA]">
-                              {item.school_code}
-                            </span>
-                          )}
-                          {item.size_label && (
-                            <span className="text-xs font-semibold bg-[#F5F5F7] text-[#1D1D1F] px-2.5 py-0.5 rounded-md border border-[#E5E5EA]">
-                              Size {item.size_label}
-                            </span>
-                          )}
-                        </div>
-                        <div className="text-xs text-[#86868B] mt-1 font-mono">
-                          {item.qty} × ₹{item.unit_price}
-                        </div>
-                      </div>
-
-                      <div className="text-lg font-mono font-bold text-[#1D1D1F]">
-                        ₹{(item.unit_price * item.qty).toLocaleString('en-IN')}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-
-                {/* Subtotal & Total Bottom Bar */}
-                <div className="pt-4 border-t border-[#F5F5F7] flex items-center justify-between">
-                  <div>
-                    {data.discount > 0 && (
-                      <p className="text-xs font-semibold text-[#34C759]">
-                        Discount Applied: -₹{data.discount.toLocaleString('en-IN')}
-                      </p>
-                    )}
-                    <span className="text-xs font-bold uppercase tracking-wider text-[#86868B]">
-                      Total Amount
-                    </span>
-                  </div>
-
-                  <span className="font-mono text-[#1D1D1F] text-4xl sm:text-5xl font-bold">
-                    ₹{data.grandTotal.toLocaleString('en-IN')}
-                  </span>
-                </div>
-              </div>
-            )}
-          </div>
         )}
+      </div>
 
+      {/* Footer */}
+      <div className="text-center text-xs text-zinc-400 dark:text-zinc-600">
+        Powered by SikkaDesk POS
       </div>
     </div>
   );

@@ -1,9 +1,10 @@
 import express, { Request, Response } from 'express';
 import { createServer as createViteServer } from 'vite';
 import path from 'path';
+import fs from 'fs';
+import crypto from 'crypto';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
-import { createClient } from '@supabase/supabase-js';
 
 dotenv.config();
 
@@ -15,73 +16,19 @@ const PORT = Number(process.env.PORT) || 3000;
 
 app.use(express.json({ limit: '2mb' }));
 
-function cleanUrl(raw: string): string {
-  if (!raw) return '';
-  let u = raw.trim();
-  const dashboardMatch = u.match(/supabase\.com\/dashboard\/project\/([a-zA-Z0-9_-]+)/i);
-  if (dashboardMatch && dashboardMatch[1]) {
-    return `https://${dashboardMatch[1]}.supabase.co`;
-  }
-  u = u.replace(/\/+$/, '');
-  if (!/^https?:\/\//i.test(u)) {
-    u = `https://${u}`;
-  }
-  return u;
-}
-
-export function isSafeSupabaseUrl(targetUrl: string): { safe: boolean; reason?: string } {
-  if (!targetUrl) return { safe: false, reason: 'URL cannot be empty' };
-  try {
-    const parsed = new URL(targetUrl);
-    if (parsed.protocol !== 'https:') {
-      return { safe: false, reason: 'Only secure HTTPS Supabase URLs are permitted' };
-    }
-
-    const host = parsed.hostname.toLowerCase();
-
-    // Block loopback, cloud metadata, and private IP networks to prevent SSRF
-    if (
-      host === 'localhost' ||
-      host.endsWith('.localhost') ||
-      host === '127.0.0.1' ||
-      host === '0.0.0.0' ||
-      host === '::1' ||
-      host === '169.254.169.254' ||
-      host.endsWith('.internal') ||
-      host.endsWith('.local') ||
-      host.startsWith('10.') ||
-      host.startsWith('192.168.') ||
-      /^172\.(1[6-9]|2\d|3[0-1])\./.test(host)
-    ) {
-      return { safe: false, reason: 'Access to loopback, metadata, or private IP networks is blocked' };
-    }
-
-    // Must be either a supabase.co subdomain or valid public domain
-    if (!host.endsWith('.supabase.co') && (!host.includes('.') || /^[\d.]+$/.test(host))) {
-      return { safe: false, reason: 'Invalid Supabase domain format' };
-    }
-
-    return { safe: true };
-  } catch {
-    return { safe: false, reason: 'Invalid URL format' };
-  }
-}
-
-function cleanKey(raw: string): string {
-  if (!raw) return '';
-  let k = raw.trim().replace(/^['"]|['"]$/g, '');
-  if (k.toLowerCase().startsWith('bearer ')) {
-    k = k.substring(7).trim();
-  }
-  return k;
-}
-
-// 0. High-Speed In-Memory Customer Display State Relay
-let activeCustomerDisplayState: any = {
-  shopName: 'SARASWATI GARMENTS',
-  upiId: 'saraswatigarments@upi',
+// ==========================================
+// 1. Scoped Customer Display State Relay
+// ==========================================
+const DEFAULT_DISPLAY_STATE = {
+  shopName: 'SIKKADESK RETAIL',
+  currencySymbol: '₹',
+  currencyCode: 'INR',
+  locale: 'en-IN',
+  upiId: '',
   cart: [],
   subtotal: 0,
+  taxAmount: 0,
+  taxLabel: 'GST',
   discount: 0,
   grandTotal: 0,
   paymentMethod: 'cash',
@@ -90,30 +37,47 @@ let activeCustomerDisplayState: any = {
   timestamp: Date.now(),
 };
 
-app.get('/api/customer-display', (req: Request, res: Response) => {
-  res.json(activeCustomerDisplayState);
+const terminalDisplayStates = new Map<string, any>();
+
+function sanitizeTerminalId(raw: unknown): string {
+  const cleaned = String(raw || 'default')
+    .trim()
+    .replace(/[^a-zA-Z0-9_-]/g, '')
+    .slice(0, 48);
+  return cleaned || 'default';
+}
+
+app.get('/api/display/:terminalId', (req: Request, res: Response) => {
+  const terminalId = sanitizeTerminalId(req.params.terminalId);
+  res.json(terminalDisplayStates.get(terminalId) || DEFAULT_DISPLAY_STATE);
 });
 
-app.post('/api/customer-display', (req: Request, res: Response) => {
+app.post('/api/display/:terminalId', (req: Request, res: Response) => {
+  const terminalId = sanitizeTerminalId(req.params.terminalId);
   if (!req.body || typeof req.body !== 'object') {
     return res.status(400).json({ success: false, message: 'Invalid payload' });
   }
 
+  const prev = terminalDisplayStates.get(terminalId) || DEFAULT_DISPLAY_STATE;
   const {
     shopName,
+    currencySymbol,
+    currencyCode,
+    locale,
     upiId,
     cart,
     subtotal,
+    taxAmount,
+    taxLabel,
     discount,
     grandTotal,
     paymentMethod,
     upiAmount,
     status,
-    studentName,
-    schoolName,
+    customerName,
+    lastBillNumber,
   } = req.body;
 
-  // Validate numeric fields and data structure
   if (typeof grandTotal !== 'undefined' && typeof grandTotal !== 'number') {
     return res.status(400).json({ success: false, message: 'Invalid total amount' });
   }
@@ -121,476 +85,312 @@ app.post('/api/customer-display', (req: Request, res: Response) => {
     return res.status(400).json({ success: false, message: 'Cart must be an array' });
   }
 
-  // Validate UPI ID format if provided
-  if (upiId && typeof upiId === 'string') {
-    const cleanUpi = upiId.trim();
-    if (cleanUpi && !/^[a-zA-Z0-9.\-_]{2,64}@[a-zA-Z]{2,64}$/.test(cleanUpi)) {
-      return res.status(400).json({ success: false, message: 'Invalid UPI ID format' });
-    }
-  }
-
-  activeCustomerDisplayState = {
-    shopName: String(shopName || activeCustomerDisplayState.shopName).slice(0, 80),
-    upiId: String(upiId || activeCustomerDisplayState.upiId).slice(0, 100),
-    cart: Array.isArray(cart) ? cart.slice(0, 100) : activeCustomerDisplayState.cart,
+  const nextState = {
+    shopName: String(shopName || prev.shopName).slice(0, 80),
+    currencySymbol: String(currencySymbol || prev.currencySymbol || '$').slice(0, 8),
+    currencyCode: String(currencyCode || prev.currencyCode || 'USD').slice(0, 8),
+    locale: String(locale || prev.locale || 'en-US').slice(0, 16),
+    upiId: typeof upiId === 'string' ? upiId.trim().slice(0, 100) : prev.upiId,
+    cart: Array.isArray(cart) ? cart.slice(0, 100) : prev.cart,
     subtotal: Number(subtotal) || 0,
+    taxAmount: Number(taxAmount) || 0,
+    taxLabel: String(taxLabel || prev.taxLabel || 'Tax').slice(0, 24),
     discount: Number(discount) || 0,
     grandTotal: Number(grandTotal) || 0,
-    paymentMethod: String(paymentMethod || 'cash'),
+    paymentMethod: String(paymentMethod || 'cash').slice(0, 20),
     upiAmount: Number(upiAmount) || 0,
     status: String(status || 'idle').slice(0, 30),
-    studentName: studentName ? String(studentName).slice(0, 60) : undefined,
-    schoolName: schoolName ? String(schoolName).slice(0, 80) : undefined,
+    customerName: customerName ? String(customerName).slice(0, 60) : undefined,
+    lastBillNumber: lastBillNumber ? String(lastBillNumber).slice(0, 40) : undefined,
     timestamp: Date.now(),
   };
 
-  res.json({ success: true, timestamp: activeCustomerDisplayState.timestamp });
+  terminalDisplayStates.set(terminalId, nextState);
+  res.json({ success: true, terminalId, timestamp: nextState.timestamp });
 });
 
-// 1. Diagnose & Introspect Supabase Server-Side (No CORS restrictions)
-app.post('/api/supabase/diagnose', async (req: Request, res: Response) => {
-  // Explicitly require caller credentials to prevent unauthorized schema leakage of server env vars
-  const url = cleanUrl(req.body.url || '');
-  const key = cleanKey(req.body.key || '');
-
-  if (!url || !key) {
-    return res.status(400).json({
-      success: false,
-      message: 'Supabase URL and API Key are required in request body',
-    });
-  }
-
-  const urlCheck = isSafeSupabaseUrl(url);
-  if (!urlCheck.safe) {
-    return res.status(400).json({
-      success: false,
-      message: urlCheck.reason || 'Invalid Supabase URL',
-    });
-  }
-
-  const detectedTables: { name: string; rowCount: number; sampleCols?: string[] }[] = [];
-  const logs: string[] = [];
-
-  try {
-    logs.push(`Connecting to ${url} via Server-side proxy...`);
-
-    // 1. Try OpenAPI schema introspection
-    try {
-      const openApiResp = await fetch(`${url}/rest/v1/`, {
-        method: 'GET',
-        headers: {
-          apikey: key,
-          Authorization: `Bearer ${key}`,
-          Accept: 'application/openapi+json, application/json',
-        },
-      });
-
-      if (openApiResp.ok) {
-        const schema: any = await openApiResp.json();
-        const defs = schema.definitions || schema.components?.schemas || {};
-        const paths = schema.paths || {};
-
-        const tableNames = new Set<string>();
-        Object.keys(defs).forEach(d => {
-          if (!d.startsWith('_')) tableNames.add(d);
-        });
-        Object.keys(paths).forEach(p => {
-          const cleanP = p.replace(/^\//, '').split('?')[0];
-          if (cleanP && !cleanP.includes('/') && !cleanP.startsWith('rpc/')) {
-            tableNames.add(cleanP);
-          }
-        });
-
-        logs.push(`OpenAPI schema returned ${tableNames.size} potential tables.`);
-
-        for (const tbl of Array.from(tableNames)) {
-          try {
-            const rowResp = await fetch(`${url}/rest/v1/${tbl}?select=*&limit=1`, {
-              headers: {
-                apikey: key,
-                Authorization: `Bearer ${key}`,
-                Range: '0-0',
-                Prefer: 'count=exact',
-              },
-            });
-
-            if (rowResp.ok) {
-              const rows: any = await rowResp.json();
-              const contentRange = rowResp.headers.get('content-range') || '';
-              const countMatch = contentRange.match(/\/(\d+|\*)/);
-              const count = countMatch && countMatch[1] !== '*' ? parseInt(countMatch[1], 10) : rows.length;
-              const cols = Array.isArray(rows) && rows.length > 0 ? Object.keys(rows[0]) : [];
-
-              detectedTables.push({
-                name: tbl,
-                rowCount: count,
-                sampleCols: cols,
-              });
-            }
-          } catch {
-            // ignore
-          }
-        }
-      } else {
-        logs.push(`OpenAPI check status: ${openApiResp.status} ${openApiResp.statusText}`);
-      }
-    } catch (e: any) {
-      logs.push(`OpenAPI check error: ${e.message}`);
-    }
-
-    // 2. If no tables detected via OpenAPI, test standard candidate tables
-    if (detectedTables.length === 0) {
-      const candidates = [
-        'schools', 'school', 'school_master', 'school_masters', 'tbl_schools', 'schools_list', 'institutions',
-        'products', 'product', 'items', 'item', 'product_master', 'product_masters', 'uniforms', 'inventory_items', 'tbl_products',
-        'sizes', 'size', 'size_items', 'size_item', 'size_master', 'sizes_master',
-        'size_groups', 'size_group', 'sizegroups', 'categories', 'size_categories',
-        'price_list', 'prices', 'price', 'school_prices', 'product_prices', 'rates', 'rate_list', 'school_rates',
-        'stocks', 'stock', 'inventory', 'product_stocks', 'stock_master', 'item_stocks',
-        'bills', 'bill', 'sales', 'sale', 'invoices', 'invoice', 'orders', 'order', 'transactions',
-        'shop_config', 'settings', 'store_config', 'config', 'profile', 'shop'
-      ];
-
-      for (const tbl of candidates) {
-        try {
-          const resp = await fetch(`${url}/rest/v1/${tbl}?select=*&limit=1`, {
-            headers: {
-              apikey: key,
-              Authorization: `Bearer ${key}`,
-              Range: '0-0',
-              Prefer: 'count=exact',
-            },
-          });
-
-          if (resp.ok) {
-            const rows: any = await resp.json();
-            const contentRange = resp.headers.get('content-range') || '';
-            const countMatch = contentRange.match(/\/(\d+|\*)/);
-            const count = countMatch && countMatch[1] !== '*' ? parseInt(countMatch[1], 10) : rows.length;
-            const cols = Array.isArray(rows) && rows.length > 0 ? Object.keys(rows[0]) : [];
-
-            detectedTables.push({
-              name: tbl,
-              rowCount: count,
-              sampleCols: cols,
-            });
-          }
-        } catch {
-          // ignore
-        }
-      }
-    }
-
-    return res.json({
-      success: true,
-      url,
-      tablesCount: detectedTables.length,
-      detectedTables,
-      logs,
-    });
-  } catch (err: any) {
-    return res.status(500).json({
-      success: false,
-      message: err.message || 'Server-side diagnose error',
-      logs,
-    });
-  }
+// Backward-compatible route with optional ?terminalId=
+app.get('/api/customer-display', (req: Request, res: Response) => {
+  const terminalId = sanitizeTerminalId(req.query.terminalId);
+  res.json(terminalDisplayStates.get(terminalId) || DEFAULT_DISPLAY_STATE);
 });
 
-// 2. Fetch specific table rows directly
-app.post('/api/supabase/fetch-table', async (req: Request, res: Response) => {
-  const url = cleanUrl(req.body.url || '');
-  const key = cleanKey(req.body.key || '');
-  const tableName = String(req.body.tableName || '').trim();
+app.post('/api/customer-display', (req: Request, res: Response) => {
+  const terminalId = sanitizeTerminalId(req.body?.terminalId || req.query.terminalId);
+  const prev = terminalDisplayStates.get(terminalId) || DEFAULT_DISPLAY_STATE;
+  const body = req.body || {};
 
-  if (!url || !key || !tableName) {
-    return res.status(400).json({ success: false, message: 'URL, Key, and TableName are required' });
+  if (typeof body.grandTotal !== 'undefined' && typeof body.grandTotal !== 'number') {
+    return res.status(400).json({ success: false, message: 'Invalid total amount' });
+  }
+  if (body.cart && !Array.isArray(body.cart)) {
+    return res.status(400).json({ success: false, message: 'Cart must be an array' });
   }
 
-  const urlCheck = isSafeSupabaseUrl(url);
-  if (!urlCheck.safe) {
-    return res.status(400).json({ success: false, message: urlCheck.reason || 'Invalid Supabase URL' });
-  }
+  const nextState = {
+    shopName: String(body.shopName || prev.shopName).slice(0, 80),
+    currencySymbol: String(body.currencySymbol || prev.currencySymbol || '$').slice(0, 8),
+    currencyCode: String(body.currencyCode || prev.currencyCode || 'USD').slice(0, 8),
+    locale: String(body.locale || prev.locale || 'en-US').slice(0, 16),
+    upiId: typeof body.upiId === 'string' ? body.upiId.trim().slice(0, 100) : prev.upiId,
+    cart: Array.isArray(body.cart) ? body.cart.slice(0, 100) : prev.cart,
+    subtotal: Number(body.subtotal) || 0,
+    taxAmount: Number(body.taxAmount) || 0,
+    taxLabel: String(body.taxLabel || prev.taxLabel || 'Tax').slice(0, 24),
+    discount: Number(body.discount) || 0,
+    grandTotal: Number(body.grandTotal) || 0,
+    paymentMethod: String(body.paymentMethod || 'cash').slice(0, 20),
+    upiAmount: Number(body.upiAmount) || 0,
+    status: String(body.status || 'idle').slice(0, 30),
+    customerName: body.customerName ? String(body.customerName).slice(0, 60) : undefined,
+    lastBillNumber: body.lastBillNumber ? String(body.lastBillNumber).slice(0, 40) : undefined,
+    timestamp: Date.now(),
+  };
 
-  try {
-    const resp = await fetch(`${url}/rest/v1/${encodeURIComponent(tableName)}?select=*`, {
-      headers: {
-        apikey: key,
-        Authorization: `Bearer ${key}`,
-      },
-    });
-
-    if (!resp.ok) {
-      const errText = await resp.text();
-      return res.status(resp.status).json({
-        success: false,
-        status: resp.status,
-        message: errText || `Failed to fetch from ${tableName}`,
-      });
-    }
-
-    const data = await resp.json();
-    return res.json({
-      success: true,
-      tableName,
-      rows: Array.isArray(data) ? data : [],
-      count: Array.isArray(data) ? data.length : 0,
-    });
-  } catch (err: any) {
-    return res.status(500).json({
-      success: false,
-      message: err.message || 'Error querying table',
-    });
-  }
+  terminalDisplayStates.set(terminalId, nextState);
+  res.json({ success: true, terminalId, timestamp: nextState.timestamp });
 });
 
 // ==========================================
-// 3. Payment Gateway & Webhook License Engine
+// 2. Server-Verified Annual License & Vendor Portal API
 // ==========================================
+const LICENSE_SIGNING_SECRET =
+  process.env.COUNTERLY_LICENSE_SECRET || 'CNTR_SALES_PRO_SEC_2026_MASTER_SECRET';
+const VENDOR_PASSWORD =
+  process.env.COUNTERLY_VENDOR_PASSWORD || 'counterly-vendor-2026';
 
-const VENDOR_SECRET_SALT = 'CNTR_SALES_PRO_SEC_2026_MASTER_SECRET';
+const DATA_DIR = path.join(__dirname, 'data');
+const LEDGER_FILE = path.join(DATA_DIR, 'vendor-licenses.json');
+
+interface ServerLicenseRecord {
+  key: string;
+  buyerName: string;
+  buyerEmail?: string;
+  tier: 'starter' | 'pro' | 'enterprise' | 'lifetime';
+  expiresAt: string;
+  machineId: string;
+  createdAt: string;
+  revoked: boolean;
+  revokedAt?: string;
+  notes?: string;
+}
+
+function readLicenseLedger(): ServerLicenseRecord[] {
+  try {
+    if (!fs.existsSync(LEDGER_FILE)) return [];
+    const raw = fs.readFileSync(LEDGER_FILE, 'utf8');
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeLicenseLedger(records: ServerLicenseRecord[]): void {
+  try {
+    if (!fs.existsSync(DATA_DIR)) {
+      fs.mkdirSync(DATA_DIR, { recursive: true });
+    }
+    const tmpFile = `${LEDGER_FILE}.tmp`;
+    fs.writeFileSync(tmpFile, JSON.stringify(records, null, 2), 'utf8');
+    fs.renameSync(tmpFile, LEDGER_FILE);
+  } catch (err) {
+    console.error('Failed to persist vendor license ledger:', err);
+  }
+}
+
+function createVendorSessionToken(): { token: string; expiresAt: number } {
+  const expiresAt = Date.now() + 12 * 60 * 60 * 1000;
+  const payload = Buffer.from(JSON.stringify({ exp: expiresAt, role: 'vendor' })).toString('base64url');
+  const sig = crypto
+    .createHmac('sha256', LICENSE_SIGNING_SECRET)
+    .update(payload)
+    .digest('base64url');
+  return { token: `${payload}.${sig}`, expiresAt };
+}
+
+function verifyVendorSessionToken(authHeader?: string): boolean {
+  if (!authHeader || !authHeader.startsWith('Bearer ')) return false;
+  const token = authHeader.slice(7).trim();
+  const [payload, sig] = token.split('.');
+  if (!payload || !sig) return false;
+  const expectedSig = crypto
+    .createHmac('sha256', LICENSE_SIGNING_SECRET)
+    .update(payload)
+    .digest('base64url');
+  if (sig !== expectedSig) return false;
+  try {
+    const decoded = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8'));
+    return typeof decoded.exp === 'number' && decoded.exp > Date.now();
+  } catch {
+    return false;
+  }
+}
 
 function fastHash(str: string): string {
   let hash = 5381;
   for (let i = 0; i < str.length; i++) {
     hash = (hash * 33) ^ str.charCodeAt(i);
   }
-  const positiveHash = (hash >>> 0).toString(16).toUpperCase();
-  return positiveHash.padStart(8, '0');
+  return (hash >>> 0).toString(16).toUpperCase().padStart(8, '0');
 }
 
-function computeLicenseChecksum(
-  tier: string,
-  expiresAtFormatted: string,
-  targetMachineShort: string
-): string {
-  const raw = `${VENDOR_SECRET_SALT}|${tier.toUpperCase()}|${expiresAtFormatted}|${targetMachineShort.toUpperCase()}`;
+function computeLicenseChecksum(tier: string, expCode: string, midShort: string): string {
+  const raw = `${LICENSE_SIGNING_SECRET}|${tier.toUpperCase()}|${expCode}|${midShort.toUpperCase()}`;
   const h1 = fastHash(raw);
   const h2 = fastHash(raw + '_ROUND2');
   return `${h1.slice(0, 2)}${h2.slice(0, 2)}`.toUpperCase();
 }
 
-function serverGenerateLicenseKey(tier: string, expiryDate: Date | null, targetMachineId: string): string {
-  const tierCode = tier.toUpperCase();
-  let expCode = '99991231';
-  if (expiryDate) {
-    const y = expiryDate.getFullYear();
-    const m = String(expiryDate.getMonth() + 1).padStart(2, '0');
-    const d = String(expiryDate.getDate()).padStart(2, '0');
-    expCode = `${y}${m}${d}`;
+app.post('/api/vendor/login', (req: Request, res: Response) => {
+  const pass = String(req.body?.password || '');
+  if (!pass || pass !== VENDOR_PASSWORD) {
+    return res.status(401).json({ success: false, message: 'Incorrect vendor passphrase.' });
   }
-  const parts = targetMachineId.split('-');
-  const midShort = (parts[1] || 'UNIV').toUpperCase().slice(0, 4);
-  const checksum = computeLicenseChecksum(tierCode, expCode, midShort);
-  return `CNTR-${tierCode}-${expCode}-${midShort}-${checksum}`;
-}
+  const session = createVendorSessionToken();
+  return res.json({ success: true, ...session });
+});
 
-interface SubscriptionOrder {
-  orderId: string;
-  machineId: string;
-  storeName: string;
-  tier: string;
-  amount: number;
-  currency: string;
-  gateway: string;
-  status: 'created' | 'paid' | 'failed';
-  paymentId?: string;
-  licenseKey?: string;
-  createdAt: number;
-  paidAt?: number;
-}
+app.get('/api/vendor/licenses', (req: Request, res: Response) => {
+  if (!verifyVendorSessionToken(req.headers.authorization)) {
+    return res.status(401).json({ success: false, message: 'Vendor session expired or unauthorized.' });
+  }
+  const records = readLicenseLedger().sort(
+    (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+  );
+  return res.json({ success: true, licenses: records });
+});
 
-const subscriptionOrders = new Map<string, SubscriptionOrder>();
-
-const PLAN_PRICES: Record<string, { amount: number; months: number; name: string }> = {
-  starter: { amount: 3999, months: 12, name: 'Starter POS (1 Year)' },
-  pro: { amount: 6999, months: 12, name: 'Pro Uniform Edition (1 Year)' },
-  enterprise: { amount: 11999, months: 12, name: 'Enterprise Multi-Counter (1 Year)' },
-  lifetime: { amount: 18999, months: 0, name: 'Lifetime Perpetual' },
-};
-
-// Create a Payment Order (Razorpay / Stripe / UPI)
-app.post('/api/subscription/create-order', (req: Request, res: Response) => {
-  const { machineId, storeName, tier = 'pro', gateway = 'razorpay' } = req.body;
-
-  if (!machineId) {
-    return res.status(400).json({ success: false, message: 'Machine ID is required' });
+app.post('/api/vendor/licenses', (req: Request, res: Response) => {
+  if (!verifyVendorSessionToken(req.headers.authorization)) {
+    return res.status(401).json({ success: false, message: 'Vendor session expired or unauthorized.' });
   }
 
-  const plan = PLAN_PRICES[tier.toLowerCase()] || PLAN_PRICES.pro;
-  const orderId = `order_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+  const buyerName = String(req.body?.buyerName || '').trim().slice(0, 80);
+  const buyerEmail = String(req.body?.buyerEmail || '').trim().slice(0, 100);
+  const tier = String(req.body?.tier || 'pro').toLowerCase() as ServerLicenseRecord['tier'];
+  const duration = String(req.body?.duration || '1y');
+  const rawMachine = String(req.body?.machineId || '').trim().toUpperCase();
+  const notes = String(req.body?.notes || '').trim().slice(0, 200);
 
-  const newOrder: SubscriptionOrder = {
-    orderId,
-    machineId: String(machineId).trim().toUpperCase(),
-    storeName: String(storeName || 'Retail Store').trim(),
-    tier: tier.toLowerCase(),
-    amount: plan.amount,
-    currency: 'INR',
-    gateway,
-    status: 'created',
-    createdAt: Date.now(),
+  if (!buyerName) {
+    return res.status(400).json({ success: false, message: 'Buyer / Store name is required.' });
+  }
+  if (!['starter', 'pro', 'enterprise', 'lifetime'].includes(tier)) {
+    return res.status(400).json({ success: false, message: 'Invalid tier selected.' });
+  }
+
+  let expCode = '20991231';
+  let expiresAtIso = '2099-12-31T23:59:59.000Z';
+  if (tier !== 'lifetime' && duration !== 'lifetime') {
+    const years = duration === '2y' ? 2 : 1;
+    const d = new Date();
+    d.setFullYear(d.getFullYear() + years);
+    expCode = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`;
+    expiresAtIso = d.toISOString();
+  }
+
+  let midShort = 'UNIV';
+  if (rawMachine) {
+    const seg = rawMachine.includes('-') ? rawMachine.split('-')[1] || rawMachine : rawMachine;
+    midShort = seg.replace(/[^A-Z0-9]/g, '').slice(0, 4).padEnd(4, 'X') || 'UNIV';
+  }
+
+  const tierUpper = tier.toUpperCase();
+  const checksum = computeLicenseChecksum(tierUpper, expCode, midShort);
+  const key = `CNTR-${tierUpper}-${expCode}-${midShort}-${checksum}`;
+
+  const newRecord: ServerLicenseRecord = {
+    key,
+    buyerName,
+    buyerEmail: buyerEmail || undefined,
+    tier,
+    expiresAt: expiresAtIso,
+    machineId: rawMachine || 'UNIV',
+    createdAt: new Date().toISOString(),
+    revoked: false,
+    notes: notes || undefined,
   };
 
-  subscriptionOrders.set(orderId, newOrder);
+  const ledger = readLicenseLedger();
+  const filtered = ledger.filter(r => r.key !== key);
+  filtered.unshift(newRecord);
+  writeLicenseLedger(filtered);
 
-  // Dynamic UPI payment payload
-  const upiVpa = 'saraswatigarments@upi';
-  const upiPayload = `upi://pay?pa=${upiVpa}&pn=Counterly_POS&am=${plan.amount}&cu=INR&tn=Counterly_${orderId}`;
+  return res.json({ success: true, license: newRecord });
+});
 
-  res.json({
+app.post('/api/vendor/revoke', (req: Request, res: Response) => {
+  if (!verifyVendorSessionToken(req.headers.authorization)) {
+    return res.status(401).json({ success: false, message: 'Vendor session expired or unauthorized.' });
+  }
+  const key = String(req.body?.key || '').trim().toUpperCase();
+  const revoked = Boolean(req.body?.revoked);
+
+  const ledger = readLicenseLedger();
+  const idx = ledger.findIndex(r => r.key === key);
+  if (idx === -1) {
+    return res.status(404).json({ success: false, message: 'License key not found in ledger.' });
+  }
+
+  ledger[idx] = {
+    ...ledger[idx],
+    revoked,
+    revokedAt: revoked ? new Date().toISOString() : undefined,
+  };
+  writeLicenseLedger(ledger);
+  return res.json({ success: true, license: ledger[idx] });
+});
+
+app.post('/api/license/verify', (req: Request, res: Response) => {
+  const rawKey = String(req.body?.licenseKey || '').trim().toUpperCase();
+  const machineId = String(req.body?.machineId || '').trim().toUpperCase();
+
+  const parts = rawKey.split('-');
+  if (parts.length !== 5 || parts[0] !== 'CNTR') {
+    return res.status(400).json({
+      success: false,
+      message: 'Invalid license format. Expected CNTR-TIER-YYYYMMDD-MID-XXXX',
+    });
+  }
+
+  const [, tierCode, expCode, midShort, checksum] = parts;
+  if (!['STARTER', 'PRO', 'ENTERPRISE', 'LIFETIME'].includes(tierCode)) {
+    return res.status(400).json({ success: false, message: `Unrecognized license tier "${tierCode}"` });
+  }
+
+  const expected = computeLicenseChecksum(tierCode, expCode, midShort);
+  if (checksum !== expected) {
+    return res.status(403).json({ success: false, message: 'License signature verification failed.' });
+  }
+
+  const ledger = readLicenseLedger();
+  const ledgerEntry = ledger.find(r => r.key === rawKey);
+  if (ledgerEntry?.revoked) {
+    return res.status(403).json({
+      success: false,
+      message: 'This license key has been revoked by SikkaDesk Licensing.',
+    });
+  }
+
+  const currentShort = (machineId.split('-')[1] || 'UNIV').slice(0, 4);
+  if (midShort !== 'UNIV' && midShort !== currentShort) {
+    return res.status(403).json({
+      success: false,
+      message: `License belongs to terminal [${midShort}], not [${currentShort}].`,
+    });
+  }
+
+  return res.json({
     success: true,
-    orderId,
-    amount: plan.amount,
-    currency: 'INR',
-    planName: plan.name,
-    machineId: newOrder.machineId,
-    upiPayload,
-    gateway,
-    // Razorpay mock/live Key ID
-    razorpayKeyId: process.env.RAZORPAY_KEY_ID || 'rzp_live_counterly_direct',
+    licenseKey: rawKey,
+    tier: tierCode.toLowerCase(),
   });
 });
 
-// Check Order Status (Webhook Fulfillment Polling)
-app.get('/api/subscription/order-status/:orderId', (req: Request, res: Response) => {
-  const { orderId } = req.params;
-  const order = subscriptionOrders.get(orderId);
-
-  if (!order) {
-    return res.status(404).json({ success: false, message: 'Order not found' });
-  }
-
-  res.json({
-    success: true,
-    orderId: order.orderId,
-    status: order.status,
-    tier: order.tier,
-    machineId: order.machineId,
-    licenseKey: order.licenseKey || null,
-    paidAt: order.paidAt || null,
-  });
-});
-
-// Webhook Receiver (Handles Stripe & Razorpay webhook events)
-app.post('/api/subscription/webhook', (req: Request, res: Response) => {
-  try {
-    const event = req.body;
-    let orderId = '';
-    let paymentId = '';
-
-    // 1. Razorpay webhook structure
-    if (event?.event === 'payment.captured' || event?.event === 'order.paid') {
-      const payment = event.payload?.payment?.entity || {};
-      orderId = payment.notes?.orderId || payment.description?.split(' ')[0] || '';
-      paymentId = payment.id || '';
-    }
-    // 2. Stripe webhook structure
-    else if (event?.type === 'checkout.session.completed' || event?.type === 'payment_intent.succeeded') {
-      const session = event.data?.object || {};
-      orderId = session.metadata?.orderId || session.client_reference_id || '';
-      paymentId = session.payment_intent || session.id || '';
-    }
-    // 3. Fallback direct payload
-    else if (event?.orderId) {
-      orderId = event.orderId;
-      paymentId = event.paymentId || 'pay_manual_verified';
-    }
-
-    if (!orderId || !subscriptionOrders.has(orderId)) {
-      // Find latest pending order if matching by machine ID
-      const matching = Array.from(subscriptionOrders.values()).find(
-        o => o.status === 'created' && (o.machineId === event.machineId || o.orderId === orderId)
-      );
-      if (matching) {
-        orderId = matching.orderId;
-      }
-    }
-
-    const order = subscriptionOrders.get(orderId);
-    if (order) {
-      const plan = PLAN_PRICES[order.tier] || PLAN_PRICES.pro;
-      let expDate: Date | null = null;
-      if (plan.months > 0) {
-        expDate = new Date();
-        expDate.setMonth(expDate.getMonth() + plan.months);
-      }
-
-      const generatedKey = serverGenerateLicenseKey(order.tier, expDate, order.machineId);
-
-      order.status = 'paid';
-      order.paymentId = paymentId;
-      order.licenseKey = generatedKey;
-      order.paidAt = Date.now();
-
-      return res.json({
-        success: true,
-        message: 'Webhook processed, license key signed and fulfilled',
-        orderId: order.orderId,
-        licenseKey: generatedKey,
-      });
-    }
-
-    return res.json({ success: true, message: 'Webhook received' });
-  } catch (err: any) {
-    return res.status(500).json({ success: false, error: err.message });
-  }
-});
-
-// Verify & Instant Auto-Unlock Endpoint
-app.post('/api/subscription/verify-payment', (req: Request, res: Response) => {
-  const { orderId, paymentId, machineId, tier = 'pro', utr } = req.body;
-
-  let order = orderId ? subscriptionOrders.get(orderId) : null;
-
-  if (!order && machineId) {
-    const plan = PLAN_PRICES[tier.toLowerCase()] || PLAN_PRICES.pro;
-    const fallbackOrderId = `order_${Date.now()}_instant`;
-    order = {
-      orderId: fallbackOrderId,
-      machineId: String(machineId).trim().toUpperCase(),
-      storeName: 'Retail Store',
-      tier: tier.toLowerCase(),
-      amount: plan.amount,
-      currency: 'INR',
-      gateway: 'instant',
-      status: 'created',
-      createdAt: Date.now(),
-    };
-    subscriptionOrders.set(fallbackOrderId, order);
-  }
-
-  if (!order) {
-    return res.status(400).json({ success: false, message: 'Invalid or missing order' });
-  }
-
-  const plan = PLAN_PRICES[order.tier] || PLAN_PRICES.pro;
-  let expDate: Date | null = null;
-  if (plan.months > 0) {
-    expDate = new Date();
-    expDate.setMonth(expDate.getMonth() + plan.months);
-  }
-
-  const generatedKey = serverGenerateLicenseKey(order.tier, expDate, order.machineId);
-
-  order.status = 'paid';
-  order.paymentId = paymentId || utr || `pay_${Date.now()}`;
-  order.licenseKey = generatedKey;
-  order.paidAt = Date.now();
-
-  res.json({
-    success: true,
-    message: 'Payment verified and commercial license key provisioned',
-    orderId: order.orderId,
-    tier: order.tier,
-    machineId: order.machineId,
-    licenseKey: generatedKey,
-    expiresAt: expDate ? expDate.toISOString() : 'PERPETUAL',
-  });
-});
-
-
-// Vite Middleware for Dev / Static serving for production
+// ==========================================
+// 3. Vite Middleware / Production Static Serve
+// ==========================================
 async function startServer() {
   if (process.env.NODE_ENV !== 'production') {
     const vite = await createViteServer({

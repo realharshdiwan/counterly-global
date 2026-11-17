@@ -1,16 +1,18 @@
-import React, { useState } from 'react';
-import { 
-  Users, 
-  UserPlus, 
-  Edit3, 
-  Trash2, 
-  X, 
-  Check, 
+import React, { useState, useEffect } from 'react';
+import {
+  Users,
+  UserPlus,
+  Edit3,
+  Trash2,
+  X,
+  Check,
   AlertCircle,
-  Upload
+  Upload,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
-import { type UserProfile, type UserRole, ROLE_INFO } from '../types';
+import { type UserProfile, type UserRole, type ShopConfig, ROLE_INFO } from '../types';
+import { db } from '../db/db';
+import { formatMoney, getCurrencySymbol } from '../lib/locale';
 
 interface StaffManagerModalProps {
   isOpen: boolean;
@@ -19,7 +21,8 @@ interface StaffManagerModalProps {
 
 export const StaffManagerModal: React.FC<StaffManagerModalProps> = ({ isOpen, onClose }) => {
   const { users, currentUser, saveUserProfile, deleteUserProfile, refreshUsers } = useAuth();
-  
+  const [shopConfig, setShopConfig] = useState<ShopConfig | null>(null);
+
   const [editingUser, setEditingUser] = useState<Partial<UserProfile> | null>(null);
   const [name, setName] = useState('');
   const [role, setRole] = useState<UserRole>('cashier');
@@ -27,10 +30,18 @@ export const StaffManagerModal: React.FC<StaffManagerModalProps> = ({ isOpen, on
   const [phone, setPhone] = useState('');
   const [avatarUrl, setAvatarUrl] = useState('');
   const [maxDiscountPct, setMaxDiscountPct] = useState('5');
-  const [maxDiscountAmt, setMaxDiscountAmt] = useState('100');
+  const [maxDiscountAmt, setMaxDiscountAmt] = useState('50');
   const [isActive, setIsActive] = useState(true);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (isOpen) {
+      db.shop_config.toArray().then((cfgs) => {
+        if (cfgs.length > 0) setShopConfig(cfgs[0]);
+      });
+    }
+  }, [isOpen]);
 
   if (!isOpen) return null;
 
@@ -150,19 +161,19 @@ export const StaffManagerModal: React.FC<StaffManagerModalProps> = ({ isOpen, on
 
   return (
     <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-xs flex items-center justify-center p-4">
-      <div className="bg-white rounded-2xl max-w-2xl w-full p-5 sm:p-6 shadow-xl border border-[#E5E5E7] animate-in zoom-in-95 max-h-[90vh] flex flex-col">
+      <div className="bg-white dark:bg-zinc-900 rounded-2xl max-w-2xl w-full p-5 sm:p-6 shadow-xl border border-[#E5E5E7] dark:border-zinc-800 max-h-[90vh] flex flex-col">
         
         {/* Header */}
-        <div className="flex items-center justify-between pb-3.5 border-b border-[#E5E5E7]">
+        <div className="flex items-center justify-between pb-3.5 border-b border-[#E5E5E7] dark:border-zinc-800">
           <div className="flex items-center gap-2.5">
-            <div className="w-9 h-9 rounded-xl bg-[#1D1D1F] text-white flex items-center justify-center shadow-xs">
+            <div className="w-9 h-9 rounded-xl bg-[#1D1D1F] dark:bg-zinc-100 text-white dark:text-zinc-900 flex items-center justify-center shadow-xs">
               <Users className="w-4.5 h-4.5" />
             </div>
             <div>
-              <h2 className="font-extrabold text-base sm:text-lg text-[#1D1D1F] tracking-tight">
+              <h2 className="font-extrabold text-base sm:text-lg text-[#1D1D1F] dark:text-zinc-100 tracking-tight">
                 Team Roles &amp; Shift PINs
               </h2>
-              <p className="text-xs text-[#86868B]">
+              <p className="text-xs text-[#86868B] dark:text-zinc-400">
                 Configure staff accounts, role permissions, and 6-digit counter PINs
               </p>
             </div>
@@ -271,7 +282,7 @@ export const StaffManagerModal: React.FC<StaffManagerModalProps> = ({ isOpen, on
                     type="text"
                     value={phone}
                     onChange={e => setPhone(e.target.value)}
-                    placeholder="+91 98765..."
+                    placeholder="+91 98765 43210"
                     className="w-full h-9 px-3 rounded-xl border border-[#E5E5E7] text-xs font-bold bg-white text-[#1D1D1F] focus:outline-none"
                   />
                 </div>
@@ -337,7 +348,7 @@ export const StaffManagerModal: React.FC<StaffManagerModalProps> = ({ isOpen, on
 
                   <div>
                     <label className="text-[11px] font-bold text-[#1D1D1F] block mb-0.5">
-                      Counter Discount Allowance (₹)
+                      Counter Discount Allowance ({getCurrencySymbol(shopConfig)})
                     </label>
                     <input
                       type="number"
@@ -418,7 +429,7 @@ export const StaffManagerModal: React.FC<StaffManagerModalProps> = ({ isOpen, on
                           <>
                             <span className="text-[#86868B]">·</span>
                             <span className="text-[10px] text-[#1D1D1F] font-bold bg-[#F5F5F7] px-1.5 py-0.5 rounded-md border border-[#E5E5E7]">
-                              Allowance: {u.max_discount_percent ?? 5}% / ₹{u.max_discount_amount ?? 100}
+                              Allowance: {u.max_discount_percent ?? 5}% / {formatMoney(u.max_discount_amount ?? 100, shopConfig)}
                             </span>
                           </>
                         )}

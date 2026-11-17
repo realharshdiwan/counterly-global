@@ -1,26 +1,28 @@
-import React, { useState } from 'react';
-import { 
-  Lock, 
-  KeyRound, 
-  Copy, 
-  Check, 
-  ShieldAlert, 
-  Download, 
-  MessageCircle, 
-  Wrench, 
-  AlertCircle, 
-  CheckCircle2, 
-  Zap 
+import React, { useState, useEffect } from 'react';
+import {
+  Lock,
+  KeyRound,
+  Copy,
+  Check,
+  ShieldAlert,
+  Download,
+  Mail,
+  MessageCircle,
+  ExternalLink,
+  AlertCircle,
+  CheckCircle2,
 } from 'lucide-react';
-import { 
-  activateLicenseKey, 
+import {
+  verifyAndActivateOnline,
   downloadEmergencySafetyBackup,
-  VENDOR_BRAND_NAME, 
-  VENDOR_CONTACT_PHONE 
+  COUNTERLY_PACKAGES,
+  getCheckoutPaymentUrl,
+  openPurchaseEmailRequest,
+  openPurchaseWhatsAppRequest,
+  type CounterlyPackageOption,
 } from '../lib/licensing';
-import { type LicenseState } from '../types';
-import { VendorLicenseGeneratorModal } from './VendorLicenseGeneratorModal';
-import { InstantLicenseCheckoutModal } from './InstantLicenseCheckoutModal';
+import { db } from '../db/db';
+import { type LicenseState, type ShopConfig } from '../types';
 
 interface LicenseExpiredLockoutProps {
   license: LicenseState;
@@ -31,14 +33,25 @@ export const LicenseExpiredLockout: React.FC<LicenseExpiredLockoutProps> = ({
   license,
   onLicenseUpdated,
 }) => {
+  const [selectedPkg, setSelectedPkg] = useState<CounterlyPackageOption>(COUNTERLY_PACKAGES[1]);
+  const [shopConfig, setShopConfig] = useState<ShopConfig | null>(null);
   const [inputKey, setInputKey] = useState('');
   const [activating, setActivating] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [copiedMid, setCopiedMid] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
-  const [isVendorModalOpen, setIsVendorModalOpen] = useState(false);
-  const [isCheckoutModalOpen, setIsCheckoutModalOpen] = useState(false);
+
+  useEffect(() => {
+    db.shop_config
+      .toArray()
+      .then(cfgs => {
+        if (cfgs[0]) setShopConfig(cfgs[0]);
+      })
+      .catch(() => {});
+  }, []);
+
+  const checkoutUrl = getCheckoutPaymentUrl(shopConfig);
 
   const handleCopyMachineId = () => {
     navigator.clipboard.writeText(license.machineId);
@@ -46,7 +59,7 @@ export const LicenseExpiredLockout: React.FC<LicenseExpiredLockoutProps> = ({
     setTimeout(() => setCopiedMid(false), 2000);
   };
 
-  const handleActivate = (e: React.FormEvent) => {
+  const handleActivate = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!inputKey.trim()) {
       setErrorMessage('Please enter an activation key.');
@@ -58,18 +71,18 @@ export const LicenseExpiredLockout: React.FC<LicenseExpiredLockoutProps> = ({
     setSuccessMessage(null);
 
     try {
-      const res = activateLicenseKey(inputKey, license.storeName);
+      const res = await verifyAndActivateOnline(inputKey, license.storeName);
       if (res.success) {
         setSuccessMessage(res.message);
         setInputKey('');
         setTimeout(() => {
           onLicenseUpdated();
-        }, 1000);
+        }, 900);
       } else {
         setErrorMessage(res.message);
       }
-    } catch (err: any) {
-      setErrorMessage(err.message || 'Failed to activate key');
+    } catch (err: unknown) {
+      setErrorMessage((err as Error)?.message || 'Failed to activate key');
     } finally {
       setActivating(false);
     }
@@ -79,180 +92,165 @@ export const LicenseExpiredLockout: React.FC<LicenseExpiredLockoutProps> = ({
     setIsExporting(true);
     try {
       await downloadEmergencySafetyBackup();
-    } catch (err) {
-      console.error('Backup error:', err);
     } finally {
       setIsExporting(false);
     }
   };
 
-  const handleWhatsAppVendor = () => {
-    const cleanPhone = VENDOR_CONTACT_PHONE.replace(/\D/g, '');
-    const msg = encodeURIComponent(
-      `Hello ${VENDOR_BRAND_NAME},\nI need to renew/activate my Counterly POS subscription.\nStore: ${license.storeName || 'Retail Store'}\nHardware ID: ${license.machineId}\nStatus: ${license.status}`
-    );
-    window.open(`https://api.whatsapp.com/send/?phone=${cleanPhone}&text=${msg}`, '_blank');
-  };
-
   const isClockTampered = license.status === 'clock_tampered';
 
   return (
-    <div className="fixed inset-0 z-50 bg-stone-900/80 backdrop-blur-md flex items-center justify-center p-4">
-      <div className="bg-white w-full max-w-lg rounded-2xl border border-stone-200 shadow-2xl p-6 sm:p-8 space-y-5 animate-in zoom-in-95 duration-200">
-        
-        {/* Header Icon & Title */}
-        <div className="text-center space-y-1.5">
-          <div className="w-12 h-12 rounded-xl bg-rose-50 border border-rose-200 text-rose-600 mx-auto flex items-center justify-center">
-            {isClockTampered ? <ShieldAlert className="w-6 h-6" /> : <Lock className="w-6 h-6" />}
+    <div className="fixed inset-0 z-50 bg-zinc-950/80 backdrop-blur-md flex items-center justify-center p-4 overflow-y-auto">
+      <div className="bg-white dark:bg-zinc-900 w-full max-w-lg rounded-2xl border border-zinc-200 dark:border-zinc-800 shadow-2xl p-6 sm:p-7 space-y-5 my-auto">
+        <div className="text-center space-y-2">
+          <div className="w-11 h-11 rounded-xl bg-rose-50 dark:bg-rose-950/50 border border-rose-200 dark:border-rose-800 text-rose-600 dark:text-rose-400 mx-auto flex items-center justify-center">
+            {isClockTampered ? <ShieldAlert className="w-5 h-5" /> : <Lock className="w-5 h-5" />}
           </div>
-          <h1 className="text-lg font-bold text-stone-900 tracking-tight">
-            {isClockTampered ? 'System Date Discrepancy Detected' : 'License Subscription Expired'}
+          <h1 className="text-lg font-bold text-zinc-950 dark:text-zinc-50 tracking-tight">
+            {isClockTampered ? 'System Clock Discrepancy' : 'License Renewal Required'}
           </h1>
-          <p className="text-xs text-stone-500 max-w-sm mx-auto">
+          <p className="text-xs text-zinc-500 dark:text-zinc-400">
             {isClockTampered
-              ? 'Your device clock has been shifted backwards. Please restore the actual current date/time to resume billing.'
+              ? 'Your device clock was rolled back. Restore the correct date and time to resume counter billing.'
               : license.isTrial
-              ? 'Your 14-day free trial has concluded. Upgrade online or enter an offline key to resume counter billing.'
-              : 'Your store annual subscription has concluded. Enter a renewal key or pay online to reactivate.'}
+              ? 'Your 14-day pilot has ended. Purchase an annual plan or enter a license key to resume.'
+              : 'Your annual software license has expired. Purchase renewal or enter a renewal key to continue.'}
           </p>
         </div>
 
-        {/* Machine ID Copy Card */}
-        <div className="p-4 bg-stone-50 rounded-xl border border-stone-200 space-y-2">
-          <div className="flex items-center justify-between text-xs text-stone-600">
+        <div className="p-3.5 bg-zinc-50 dark:bg-zinc-950 rounded-xl border border-zinc-200 dark:border-zinc-800 space-y-2">
+          <div className="flex items-center justify-between text-xs text-zinc-500 dark:text-zinc-400">
             <span className="font-medium">Hardware Terminal ID</span>
-            <span className="text-[11px] text-stone-400">Unique to this PC</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <div className="flex-1 bg-white px-3 py-2 rounded-lg border border-stone-200 font-mono text-xs font-bold text-stone-900 tracking-wider select-all shadow-xs">
-              {license.machineId}
-            </div>
             <button
               type="button"
               onClick={handleCopyMachineId}
-              className="flex items-center gap-1.5 px-3 py-2 bg-white hover:bg-stone-100 border border-stone-200 rounded-lg text-xs font-semibold text-stone-700 hover:text-stone-900 transition-colors cursor-pointer shadow-xs"
+              className="flex items-center gap-1 font-medium text-zinc-700 dark:text-zinc-300 hover:text-zinc-950 dark:hover:text-white cursor-pointer"
             >
-              {copiedMid ? (
-                <>
-                  <Check className="w-3.5 h-3.5 text-emerald-600" />
-                  <span className="text-emerald-700">Copied</span>
-                </>
-              ) : (
-                <>
-                  <Copy className="w-3.5 h-3.5 text-stone-500" />
-                  <span>Copy</span>
-                </>
-              )}
+              {copiedMid ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
+              <span>{copiedMid ? 'Copied' : 'Copy'}</span>
             </button>
           </div>
-        </div>
-
-        {/* Action Buttons */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-          <button
-            type="button"
-            onClick={() => setIsCheckoutModalOpen(true)}
-            className="py-2.5 px-4 bg-stone-900 hover:bg-stone-800 text-white rounded-xl text-xs font-semibold flex items-center justify-center gap-2 transition-colors cursor-pointer shadow-xs"
-          >
-            <Zap className="w-3.5 h-3.5 text-amber-300" />
-            <span>Instant Online Unlock</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={handleWhatsAppVendor}
-            className="py-2.5 px-4 bg-white hover:bg-stone-50 border border-stone-200 text-stone-800 rounded-xl text-xs font-semibold flex items-center justify-center gap-2 transition-colors cursor-pointer shadow-xs"
-          >
-            <MessageCircle className="w-3.5 h-3.5 text-emerald-600" />
-            <span>WhatsApp Support</span>
-          </button>
-        </div>
-
-        {/* Activation Key Form */}
-        <form onSubmit={handleActivate} className="space-y-3 pt-3 border-t border-stone-200">
-          <div className="flex items-center justify-between">
-            <label className="text-xs font-semibold text-stone-900 flex items-center gap-1.5">
-              <KeyRound className="w-3.5 h-3.5 text-stone-700" />
-              <span>Enter Activation / Renewal Key</span>
-            </label>
-            <span className="text-[11px] text-stone-400">Offline certificate</span>
+          <div className="font-mono text-xs font-semibold text-zinc-950 dark:text-zinc-50 select-all">
+            {license.machineId}
           </div>
+        </div>
+
+        {!isClockTampered && (
+          <div className="space-y-2.5">
+            <div className="grid grid-cols-3 gap-2">
+              {COUNTERLY_PACKAGES.map(pkg => {
+                const active = selectedPkg.id === pkg.id;
+                return (
+                  <button
+                    key={pkg.id}
+                    type="button"
+                    onClick={() => setSelectedPkg(pkg)}
+                    className={`p-2.5 rounded-xl border text-left cursor-pointer ${
+                      active
+                        ? 'border-zinc-950 dark:border-zinc-100 bg-zinc-950 dark:bg-zinc-100 text-white dark:text-zinc-950'
+                        : 'border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100'
+                    }`}
+                  >
+                    <div className="text-[11px] font-bold leading-tight">{pkg.name}</div>
+                    <div className="text-xs font-mono font-bold tabular-nums mt-0.5">{pkg.priceLabel}</div>
+                  </button>
+                );
+              })}
+            </div>
+
+            <div className="flex flex-wrap gap-2">
+              {checkoutUrl && (
+                <a
+                  href={checkoutUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex-1 min-w-[150px] py-2 px-3 rounded-lg bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-semibold flex items-center justify-center gap-1.5"
+                >
+                  <ExternalLink className="w-3.5 h-3.5" />
+                  <span>Pay Online</span>
+                </a>
+              )}
+              <button
+                type="button"
+                onClick={() =>
+                  openPurchaseEmailRequest({
+                    packageOption: selectedPkg,
+                    machineId: license.machineId,
+                    storeName: shopConfig?.legal_name || license.storeName,
+                  })
+                }
+                className="flex-1 min-w-[130px] py-2 px-3 rounded-lg border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 text-xs font-semibold flex items-center justify-center gap-1.5 cursor-pointer"
+              >
+                <Mail className="w-3.5 h-3.5" />
+                <span>Email Order</span>
+              </button>
+              <button
+                type="button"
+                onClick={() =>
+                  openPurchaseWhatsAppRequest({
+                    packageOption: selectedPkg,
+                    machineId: license.machineId,
+                    storeName: shopConfig?.legal_name || license.storeName,
+                  })
+                }
+                className="flex-1 min-w-[130px] py-2 px-3 rounded-lg border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 text-xs font-semibold flex items-center justify-center gap-1.5 cursor-pointer"
+              >
+                <MessageCircle className="w-3.5 h-3.5" />
+                <span>WhatsApp Order</span>
+              </button>
+            </div>
+          </div>
+        )}
+
+        <form onSubmit={handleActivate} className="space-y-3">
+          <label className="text-xs font-semibold text-zinc-900 dark:text-zinc-100 flex items-center gap-1.5">
+            <KeyRound className="w-3.5 h-3.5" />
+            <span>Enter Renewal / Activation Key</span>
+          </label>
 
           {errorMessage && (
-            <div className="p-3 bg-rose-50 border border-rose-200 rounded-lg text-xs font-medium text-rose-800 flex items-start gap-2">
-              <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+            <div className="p-2.5 bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-800 rounded-lg text-xs text-rose-700 dark:text-rose-300 flex items-center gap-2">
+              <AlertCircle className="w-4 h-4 shrink-0" />
               <span>{errorMessage}</span>
             </div>
           )}
 
           {successMessage && (
-            <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-lg text-xs font-medium text-emerald-800 flex items-start gap-2">
-              <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
+            <div className="p-2.5 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 rounded-lg text-xs text-emerald-700 dark:text-emerald-300 flex items-center gap-2">
+              <CheckCircle2 className="w-4 h-4 shrink-0" />
               <span>{successMessage}</span>
             </div>
           )}
 
-          <div className="space-y-2">
-            <input
-              type="text"
-              placeholder="e.g. CNTR-PRO-20271231-XXXX-XXXX"
-              value={inputKey}
-              onChange={(e) => setInputKey(e.target.value.toUpperCase())}
-              className="w-full px-3 py-2 bg-stone-50 border border-stone-200 rounded-lg text-xs font-mono font-bold uppercase tracking-wider text-stone-900 focus:outline-none focus:ring-1 focus:ring-stone-900"
-            />
+          <input
+            type="text"
+            placeholder="CNTR-PRO-20271231-XXXX-XXXX"
+            value={inputKey}
+            onChange={e => setInputKey(e.target.value.toUpperCase())}
+            className="w-full h-10 px-3 bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg text-xs font-mono font-semibold uppercase text-zinc-950 dark:text-zinc-50 focus:outline-none focus:ring-2 focus:ring-zinc-900 dark:focus:ring-zinc-100"
+          />
 
-            <button
-              type="submit"
-              disabled={activating || !inputKey.trim()}
-              className="w-full py-2.5 bg-stone-900 hover:bg-stone-800 disabled:opacity-40 text-white rounded-lg text-xs font-semibold transition-colors cursor-pointer"
-            >
-              {activating ? 'Validating Certificate...' : 'Unlock Terminal Now'}
-            </button>
-          </div>
+          <button
+            type="submit"
+            disabled={activating || !inputKey.trim()}
+            className="w-full py-2.5 bg-zinc-950 dark:bg-zinc-100 hover:opacity-90 disabled:opacity-40 text-white dark:text-zinc-950 rounded-lg text-xs font-semibold transition-opacity cursor-pointer"
+          >
+            {activating ? 'Verifying Key...' : 'Unlock Terminal'}
+          </button>
         </form>
 
-        {/* Safety Export Guarantee & Vendor Tool */}
-        <div className="pt-2 border-t border-stone-200 flex items-center justify-between text-xs">
+        <div className="pt-3 border-t border-zinc-200 dark:border-zinc-800 flex items-center justify-between text-xs">
           <button
             type="button"
             onClick={handleEmergencyBackup}
             disabled={isExporting}
-            className="flex items-center gap-1.5 text-stone-500 hover:text-stone-900 font-medium transition-colors cursor-pointer"
-            title="Download full JSON export of all your bills, inventory, and database"
+            className="flex items-center gap-1.5 text-zinc-500 dark:text-zinc-400 hover:text-zinc-950 dark:hover:text-white cursor-pointer"
           >
             <Download className="w-3.5 h-3.5" />
-            <span>{isExporting ? 'Downloading...' : 'Export Store Backup'}</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setIsVendorModalOpen(true)}
-            className="flex items-center gap-1 text-stone-500 hover:text-stone-900 font-medium cursor-pointer"
-          >
-            <Wrench className="w-3 h-3" />
-            <span>Vendor Mode</span>
+            <span>{isExporting ? 'Exporting...' : 'Export Store Backup'}</span>
           </button>
         </div>
       </div>
-
-      {/* Vendor Key Generator Modal */}
-      <VendorLicenseGeneratorModal
-        isOpen={isVendorModalOpen}
-        onClose={() => setIsVendorModalOpen(false)}
-        prefillMachineId={license.machineId}
-        prefillStoreName={license.storeName}
-      />
-
-      {/* Instant Checkout Modal */}
-      <InstantLicenseCheckoutModal
-        isOpen={isCheckoutModalOpen}
-        onClose={() => setIsCheckoutModalOpen(false)}
-        license={license}
-        onLicenseActivated={() => {
-          setIsCheckoutModalOpen(false);
-          onLicenseUpdated();
-        }}
-      />
     </div>
   );
 };

@@ -3,30 +3,33 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { AuthProvider, useAuth, type AppTab } from './context/AuthContext';
-import { ThemeProvider } from './context/ThemeContext';
 import { Header } from './components/Header';
 import { QuickBill } from './components/QuickBill';
-import { PriceManager } from './components/PriceManager';
-import { InventoryManager } from './components/InventoryManager';
-import { SchoolsManager } from './components/SchoolsManager';
+import { CatalogManager } from './components/CatalogManager';
 import { BillsHistory } from './components/BillsHistory';
 import { SettingsView } from './components/SettingsView';
 import { ReceiptModal } from './components/ReceiptModal';
 import { PinLoginScreen } from './components/PinLoginScreen';
 import { ManagerOverrideModal } from './components/ManagerOverrideModal';
 import { CustomerDisplayView } from './components/CustomerDisplayView';
-import { EReceiptVerificationView } from './components/EReceiptVerificationView';
 import { OfflineIndicator } from './components/OfflineIndicator';
 import { LicenseBanner } from './components/LicenseBanner';
 import { LicenseManagerModal } from './components/LicenseManagerModal';
 import { LicenseExpiredLockout } from './components/LicenseExpiredLockout';
 import { OnboardingWizardModal } from './components/OnboardingWizardModal';
 import { ProductLandingPage } from './components/ProductLandingPage';
+import { VendorPortalView } from './components/VendorPortalView';
+import { GuidedSandboxBanner } from './components/GuidedSandboxBanner';
 import { getLicenseStatus } from './lib/licensing';
-import { db, initializeDatabase } from './db/db';
-import { type Bill, type ShopConfig, type LicenseState } from './types';
+import {
+  db,
+  initializeDatabase,
+  launchInteractiveSandbox,
+  exitSandboxToLiveStore,
+} from './db/db';
+import { type Bill, type ShopConfig, type LicenseState, type CustomerProfile } from './types';
 
 interface MainLayoutProps {
   onSwitchToLanding: () => void;
@@ -41,17 +44,16 @@ function MainLayout({
   license,
   refreshLicense,
   isOnboardingOpen,
-  setIsOnboardingOpen
+  setIsOnboardingOpen,
 }: MainLayoutProps) {
-  const { currentUser, isLocked, lockScreen } = useAuth();
+  const { isLocked, lockScreen } = useAuth();
   const [activeTab, setActiveTab] = useState<AppTab>('billing');
   const [selectedBillForReceipt, setSelectedBillForReceipt] = useState<Bill | null>(null);
+  const [registerCustomer, setRegisterCustomer] = useState<CustomerProfile | null>(null);
   const [shopConfig, setShopConfig] = useState<ShopConfig | null>(null);
   const [appRefreshKey, setAppRefreshKey] = useState(0);
 
   const [isLicenseModalOpen, setIsLicenseModalOpen] = useState(false);
-
-  // Manager Override Modal state (for cashiers accessing locked tabs)
   const [overrideModalOpen, setOverrideModalOpen] = useState(false);
   const [targetRestrictedTab, setTargetRestrictedTab] = useState<AppTab | null>(null);
 
@@ -59,23 +61,19 @@ function MainLayout({
     async function loadConfig() {
       try {
         const configs = await db.shop_config.toArray();
-        if (configs.length > 0) {
-          setShopConfig(configs[0]);
-        }
+        if (configs.length > 0) setShopConfig(configs[0]);
       } catch (err) {
         console.error('Failed to load shop config in main layout:', err);
       }
     }
     loadConfig();
 
-    // Re-verify license periodically every 30 seconds
     const licenseInterval = setInterval(() => {
       refreshLicense();
     }, 30000);
     return () => clearInterval(licenseInterval);
   }, [refreshLicense]);
 
-  // Keyboard shortcut: Ctrl+L / Cmd+L to lock screen / switch shift
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && (e.key === 'l' || e.key === 'L')) {
@@ -87,15 +85,10 @@ function MainLayout({
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [lockScreen]);
 
-  const handleBillCreated = (newBill: Bill) => {
-    // Reload shop config if sequence was bumped
+  const handleBillCreated = () => {
     db.shop_config.toArray().then(cfgs => {
       if (cfgs.length > 0) setShopConfig(cfgs[0]);
     });
-  };
-
-  const handleOpenReceipt = (bill: Bill) => {
-    setSelectedBillForReceipt(bill);
   };
 
   const handleRequestManagerOverride = (tab: AppTab) => {
@@ -111,25 +104,18 @@ function MainLayout({
   };
 
   return (
-    <div className="min-h-screen bg-[#F5F5F7] dark:bg-zinc-950 flex flex-col text-[#1D1D1F] dark:text-zinc-100 transition-colors">
-      {/* 6-Digit PIN Keypad Screen (when locked) */}
+    <div className="min-h-screen bg-[#F5F5F7] dark:bg-zinc-950 flex flex-col text-zinc-950 dark:text-zinc-50 transition-colors">
       {isLocked && <PinLoginScreen />}
 
-      {/* Expiry / Lockout Overlay if license or trial expired */}
       {!license.isValid && (
-        <LicenseExpiredLockout
-          license={license}
-          onLicenseUpdated={refreshLicense}
-        />
+        <LicenseExpiredLockout license={license} onLicenseUpdated={refreshLicense} />
       )}
 
-      {/* Top Warning Banner if trial/subscription expires soon */}
       <LicenseBanner
         license={license}
         onOpenLicenseModal={() => setIsLicenseModalOpen(true)}
       />
 
-      {/* Top Application Header with active staff badge & license indicator */}
       <Header
         activeTab={activeTab}
         setActiveTab={setActiveTab}
@@ -140,34 +126,48 @@ function MainLayout({
         onSwitchToLanding={onSwitchToLanding}
       />
 
-      {/* Main Content Area */}
+      <GuidedSandboxBanner
+        onNavigateTab={setActiveTab}
+        refreshSignal={appRefreshKey}
+        onSwitchToLiveStore={async () => {
+          await exitSandboxToLiveStore();
+          setSelectedBillForReceipt(null);
+          setRegisterCustomer(null);
+          setActiveTab('billing');
+          const cfgs = await db.shop_config.toArray();
+          if (cfgs.length > 0) setShopConfig(cfgs[0]);
+          setAppRefreshKey(k => k + 1);
+          setIsOnboardingOpen(true);
+        }}
+      />
+
       <main key={appRefreshKey} className="flex-1 pb-16 lg:pb-8">
         {activeTab === 'billing' && (
           <QuickBill
             onBillCreated={handleBillCreated}
-            onOpenReceipt={handleOpenReceipt}
+            onOpenReceipt={bill => setSelectedBillForReceipt(bill)}
+            preselectedCustomer={registerCustomer}
+            onClearPreselectedCustomer={() => setRegisterCustomer(null)}
           />
         )}
 
-        {activeTab === 'prices' && <PriceManager />}
-
-        {activeTab === 'inventory' && <InventoryManager />}
-
-        {activeTab === 'schools' && (
-          <SchoolsManager
-            onSelectSchoolForBilling={() => setActiveTab('billing')}
-            onViewSchoolPrices={() => setActiveTab('prices')}
-          />
+        {activeTab === 'catalog' && (
+          <CatalogManager onNavigateToRegister={() => setActiveTab('billing')} />
         )}
 
         {activeTab === 'bills' && (
-          <BillsHistory onOpenReceipt={handleOpenReceipt} />
+          <BillsHistory
+            onOpenReceipt={bill => setSelectedBillForReceipt(bill)}
+            onNavigateToRegister={cust => {
+              if (cust) setRegisterCustomer(cust);
+              setActiveTab('billing');
+            }}
+          />
         )}
 
         {activeTab === 'settings' && <SettingsView />}
       </main>
 
-      {/* Receipt Modal (Browser Print / Bluetooth Thermal Print / WhatsApp Slip) */}
       {selectedBillForReceipt && (
         <ReceiptModal
           bill={selectedBillForReceipt}
@@ -176,7 +176,6 @@ function MainLayout({
         />
       )}
 
-      {/* License & Subscription Plan Modal */}
       <LicenseManagerModal
         isOpen={isLicenseModalOpen}
         onClose={() => setIsLicenseModalOpen(false)}
@@ -184,7 +183,6 @@ function MainLayout({
         onLicenseUpdated={refreshLicense}
       />
 
-      {/* First-Run Onboarding Setup Wizard */}
       <OnboardingWizardModal
         isOpen={isOnboardingOpen}
         onClose={() => setIsOnboardingOpen(false)}
@@ -197,7 +195,6 @@ function MainLayout({
         }}
       />
 
-      {/* Manager Override Modal (for restricted actions) */}
       <ManagerOverrideModal
         isOpen={overrideModalOpen}
         onClose={() => {
@@ -211,7 +208,6 @@ function MainLayout({
         } section.`}
       />
 
-      {/* Connectivity Status Indicator */}
       <OfflineIndicator />
     </div>
   );
@@ -219,17 +215,14 @@ function MainLayout({
 
 export default function App() {
   const [isInitializing, setIsInitializing] = useState(true);
-
-  // License & Subscription state
   const [license, setLicense] = useState<LicenseState>(() => getLicenseStatus());
 
-  // Smart Hybrid Routing: New visitors see Landing Page; configured stores see POS counter
-  const [viewMode, setViewMode] = useState<'landing' | 'pos'>(() => {
+  const [viewMode, setViewMode] = useState<'landing' | 'pos' | 'vendor'>(() => {
     if (typeof window === 'undefined') return 'pos';
     const params = new URLSearchParams(window.location.search);
+    if (params.get('view') === 'vendor' || window.location.hash.includes('vendor')) return 'vendor';
     if (params.get('view') === 'landing') return 'landing';
     if (params.get('view') === 'pos') return 'pos';
-    // If store setup is already completed, go straight to POS
     const isCompleted = localStorage.getItem('counterly_onboarding_completed') === 'true';
     return isCompleted ? 'pos' : 'landing';
   });
@@ -251,33 +244,76 @@ export default function App() {
     );
   });
 
-  const [verifyBillNumber, setVerifyBillNumber] = useState<string | null>(() => {
-    if (typeof window === 'undefined') return null;
-    const params = new URLSearchParams(window.location.search);
-    return params.get('verify') || null;
-  });
+  const viewModeRef = useRef<'landing' | 'pos' | 'vendor'>(viewMode);
+  viewModeRef.current = viewMode;
+  const prevViewRef = useRef<'landing' | 'pos'>('landing');
 
   useEffect(() => {
+    const syncUrl = (target: 'landing' | 'pos' | 'vendor') => {
+      try {
+        window.history.pushState({}, '', `?view=${target}`);
+      } catch {
+        // ignore sandboxed iframe history errors
+      }
+    };
+
+    const openVendor = () => {
+      if (viewModeRef.current !== 'vendor') {
+        prevViewRef.current = viewModeRef.current === 'pos' ? 'pos' : 'landing';
+        setViewMode('vendor');
+        syncUrl('vendor');
+      }
+    };
+
+    const toggleVendor = () => {
+      if (viewModeRef.current === 'vendor') {
+        const target = prevViewRef.current;
+        setViewMode(target);
+        syncUrl(target);
+      } else {
+        openVendor();
+      }
+    };
+
     const checkMode = () => {
       const params = new URLSearchParams(window.location.search);
-      const isMode = (
+      const isMode =
         params.get('mode') === 'customer_display' ||
         params.get('mode') === 'standee' ||
         window.location.hash.includes('customer-display') ||
-        window.location.hash.includes('standee')
-      );
+        window.location.hash.includes('standee');
       setIsCustomerDisplayMode(isMode);
-      setVerifyBillNumber(params.get('verify') || null);
+      if (params.get('view') === 'vendor' || window.location.hash.includes('vendor')) {
+        setViewMode('vendor');
+      } else if (params.get('view') === 'landing') {
+        setViewMode('landing');
+      } else if (params.get('view') === 'pos') {
+        setViewMode('pos');
+      }
+    };
 
-      if (params.get('view') === 'landing') setViewMode('landing');
-      if (params.get('view') === 'pos') setViewMode('pos');
+    const handleVendorShortcut = (e: KeyboardEvent) => {
+      const isF8 = e.code === 'F8' && !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey;
+      const isAltShiftV = e.altKey && e.shiftKey && e.code === 'KeyV';
+      const isCtrlAltV = (e.ctrlKey || e.metaKey) && e.altKey && e.code === 'KeyV';
+      const isCtrlShiftDot = (e.ctrlKey || e.metaKey) && e.shiftKey && e.code === 'Period';
+
+      if (isF8 || isAltShiftV || isCtrlAltV || isCtrlShiftDot) {
+        e.preventDefault();
+        e.stopPropagation();
+        toggleVendor();
+      }
     };
 
     window.addEventListener('hashchange', checkMode);
     window.addEventListener('popstate', checkMode);
+    window.addEventListener('counterly:open-vendor', openVendor);
+    document.addEventListener('keydown', handleVendorShortcut, true);
     return () => {
       window.removeEventListener('hashchange', checkMode);
       window.removeEventListener('popstate', checkMode);
+      window.removeEventListener('counterly:open-vendor', openVendor);
+      document.removeEventListener('keydown', handleVendorShortcut, true);
     };
   }, []);
 
@@ -294,50 +330,52 @@ export default function App() {
     init();
   }, []);
 
-  if (verifyBillNumber) {
-    return (
-      <EReceiptVerificationView
-        billNumber={verifyBillNumber}
-        onBackToApp={() => {
-          const url = new URL(window.location.href);
-          url.searchParams.delete('verify');
-          window.history.pushState({}, '', url.pathname);
-          setVerifyBillNumber(null);
-        }}
-      />
-    );
-  }
-
   if (isCustomerDisplayMode) {
     return <CustomerDisplayView />;
   }
 
   if (isInitializing) {
     return (
-      <div className="min-h-screen bg-[#F5F5F7] flex flex-col items-center justify-center p-4">
-        <div className="w-12 h-12 rounded-2xl bg-[#1D1D1F] text-white flex items-center justify-center font-bold text-2xl shadow-xs animate-pulse">
-          C
+      <div className="min-h-screen bg-[#F5F5F7] dark:bg-zinc-950 flex flex-col items-center justify-center p-4">
+        <div className="w-12 h-12 rounded-2xl bg-zinc-950 dark:bg-zinc-100 text-white dark:text-zinc-950 flex items-center justify-center font-bold text-2xl">
+          S
         </div>
-        <p className="font-semibold text-sm text-[#1D1D1F] mt-3">
-          Counterly POS
+        <p className="font-semibold text-sm text-zinc-950 dark:text-zinc-50 mt-3">
+          SikkaDesk POS
         </p>
-        <p className="text-xs text-[#86868B] mt-1">
-          Initializing Counterly POS...
-        </p>
+        <p className="text-xs text-zinc-500 mt-1">Initializing local database...</p>
       </div>
     );
   }
 
-  // Render Product Landing Page for new visitors or when explicitly switched
+  if (viewMode === 'vendor') {
+    return (
+      <VendorPortalView
+        onBackToLanding={() => {
+          window.history.pushState({}, '', '?view=landing');
+          setViewMode('landing');
+        }}
+        onLaunchPOS={() => {
+          window.history.pushState({}, '', '?view=pos');
+          setViewMode('pos');
+        }}
+      />
+    );
+  }
+
   if (viewMode === 'landing') {
     return (
       <ProductLandingPage
         onLaunchPOS={() => {
           setViewMode('pos');
-          // If onboarding wasn't completed, trigger wizard
           if (localStorage.getItem('counterly_onboarding_completed') !== 'true') {
             setIsOnboardingOpen(true);
           }
+        }}
+        onLaunchSandbox={async () => {
+          await launchInteractiveSandbox();
+          setIsOnboardingOpen(false);
+          setViewMode('pos');
         }}
         license={license}
         onLicenseUpdated={refreshLicense}
@@ -357,4 +395,3 @@ export default function App() {
     </AuthProvider>
   );
 }
-
